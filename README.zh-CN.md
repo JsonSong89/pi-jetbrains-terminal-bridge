@@ -1,5 +1,7 @@
 # Pi Terminal Bridge（pi 终端桥）
 
+[English](README.md) · [简体中文](README.zh-CN.md)
+
 [JetBrains 插件] 为 JetBrains IDE 提供 [Pi coding agent](https://pi.dev) 的持久会话 —— 启动、跟踪与恢复会话，并在 IDE 与 pi CLI 终端之间维持一条实时通道。
 
 > **前置条件：** 需单独安装 Pi CLI。

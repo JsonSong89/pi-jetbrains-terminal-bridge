@@ -1,5 +1,7 @@
 # Pi Terminal Bridge
 
+[English](README.md) · [简体中文](README.zh-CN.md)
+
 [JetBrains plugin] Persistent [Pi coding agent](https://pi.dev) sessions for JetBrains IDEs — launch, track and resume conversations, with a live bridge between the IDE and the pi CLI terminal.
 
 > **Prerequisite:** install the Pi CLI separately.
@@ -7,7 +9,7 @@
 
 ## Features
 
-- **Persistent conversations** — Pi sessions survive IDE restarts; conversations are listed in the Pi panel and relaunch with `pi --session <id>` on click. Terminology is not auto-revived on startup; you decide when to resume.
+- **Persistent conversations** — Pi sessions survive IDE restarts; conversations are listed in the Pi panel and relaunch with `pi --session <id>` on click. Terminals are not auto-revived on startup; you decide when to resume.
 - **Live IDEA ↔ pi bridge** — a loopback TCP channel with a per-instance token keeps the panel in sync with the terminal in real time:
   - working ● / idle badges per conversation
   - current model display

@@ -38,4 +38,4 @@ pi 侧 extension 源码以 Kotlin 常量内联在 `PiBridgeInstaller` 中，安�
 
 ## 文档同步约定
 
-每个功能迭代（P0/P1/P2）合入时同步更新 `README.md` / `README_CN.md`；设计变更先改 `docs/tasks/` 里的设计文档再写代码。
+每个功能迭代（P0/P1/P2）合入时同步更新 `README.md` / `README.zh-CN.md`；设计变更先改 `docs/tasks/` 里的设计文档再写代码。
