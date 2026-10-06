@@ -5,7 +5,7 @@ Plugin identity:
 - **Name:** Pi Terminal Bridge
 - **ID:** `com.piterminal.bridge` (new listing; not an update of the old pi-agent-launcher plugin)
 - **Version:** `build.gradle.kts` → `version`
-- **Repo:** https://github.com/JsonSong89/pi-agent-launcher
+- **Repo:** https://github.com/JsonSong89/pi-jetbrains-terminal-bridge
 
 Do not publish from a local `./gradlew` run. CI on GitHub Actions is the source of truth.
 
