@@ -5,6 +5,7 @@ import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.Logger
@@ -55,6 +56,15 @@ class PiTerminalService(private val project: Project) : Disposable {
     var onRestartRequested: ((conversationId: String, tabName: String) -> Unit)? = null
     @Volatile
     private var contentListenerInstalled = false
+    /** Filled off-EDT. getShellPath() runBlocking-throws if called on the EDT. */
+    @Volatile
+    private var cachedShellPath: String? = null
+
+    init {
+        ApplicationManager.getApplication().executeOnPooledThread {
+            cachedShellPath = probeTerminalShellPath()
+        }
+    }
 
     fun addListener(listener: SessionListener) {
         listeners.add(listener)
@@ -451,7 +461,9 @@ class PiTerminalService(private val project: Project) : Disposable {
 
     private fun classifyTerminalShell(): ShellKind {
         if (!SystemInfo.isWindows) return ShellKind.POSIX
-        val path = detectTerminalShellPath()?.trim()?.trim('"') ?: return ShellKind.POWERSHELL
+        val path = cachedShellPath?.trim()?.trim('"')
+            ?: PiSettings.getInstance().state.shellPath.trim().trim('"').takeIf { it.isNotEmpty() }
+            ?: return ShellKind.POWERSHELL
         val base = shellExecutableName(path)
         return when {
             base == "cmd.exe" || base == "cmd" -> ShellKind.CMD
@@ -462,7 +474,8 @@ class PiTerminalService(private val project: Project) : Disposable {
         }
     }
 
-    private fun detectTerminalShellPath(): String? {
+    /** Must not run on the EDT: TerminalProjectOptionsProvider.getShellPath runBlocking-throws. */
+    private fun probeTerminalShellPath(): String? {
         val specs = listOf(
             Triple("org.jetbrains.plugins.terminal.TerminalProjectOptionsProvider", true, listOf("getShellPath", "getDefaultShellPath")),
             Triple("org.jetbrains.plugins.terminal.TerminalOptionsProvider", false, listOf("getShellPath", "getShellPathOrDefault", "getDefaultShellPath"))
