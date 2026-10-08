@@ -6,7 +6,7 @@
     <description><![CDATA[
     <h2>Pi Terminal Bridge</h2>
     <p>
-        Persistent <a href="https://pi.dev">Pi coding agent</a> sessions for JetBrains IDEs — launch, track and resume conversations, with a live bridge between the IDE and the pi terminal. Integrated terminal with the full pi TUI, send code context, model selection, optional auto-open of files modified by Pi.
+        Persistent <a href="https://pi.dev">Pi coding agent</a> sessions for JetBrains IDEs — launch, track and resume conversations, with a live bridge between the IDE and the pi terminal. The Pi tab is a real terminal running the full pi TUI. Send code context from the editor, pick a model, optionally open files Pi edited.
     </p>
 
     <blockquote>
@@ -16,35 +16,73 @@
 
     <h3>Features</h3>
     <ul>
-        <li><b>Persistent conversations</b> — sessions survive IDE restarts; click to relaunch and resume</li>
-        <li><b>Live bridge</b> — working/idle badges, current model, and session switches (<code>/new</code>, <code>/fork</code>) reflected in the IDE panel in real time; old sessions archived and resumable</li>
+        <li><b>Persistent conversations</b> — sessions survive IDE restarts; click to relaunch and resume. Terminals are not auto-revived on startup.</li>
+        <li><b>Live bridge</b> — working/idle badges, current model, and session switches (<code>/new</code>, <code>/fork</code>, <code>/resume</code>) reflected in the IDE panel in real time; old sessions archived and resumable</li>
         <li><b>One-click launch</b> from the toolbar in a dedicated Terminal tab</li>
-        <li><b>Send to Pi</b> — select code, right-click, and send file reference (<code>@path/file.go#L10-25</code>) to Pi's input</li>
+        <li><b>Send to Pi</b> — select code, right-click, and send a file reference (<code>@path/file.go#L10-25</code>) to Pi's input. The panel input also has a context menu and accepts files dropped from the Project view.</li>
         <li><b>Notifications</b> — optional balloon when the agent finishes (only while the IDE is in the background; click to focus that terminal); optionally open files Pi edited</li>
         <li><b>Flexible configuration</b> for models, thinking levels, and launch options</li>
     </ul>
 
-    <h3>Usage</h3>
-    <h4>Quick Start</h4>
+    <h3>Quick start</h3>
     <ol>
-        <li>Click the <b>pi</b> button in the main toolbar.</li>
+        <li>Click the <b>pi</b> button in the main toolbar (or press <code>Ctrl+Shift+P</code>).</li>
         <li>A new Pi tab opens in the Terminal window and runs <code>pi</code> automatically.</li>
         <li>Select code, right-click, then <b>Send to Pi</b> to add file context to your prompt.</li>
         <li>Close and reopen the IDE — conversations are listed in the Pi panel and resume on click.</li>
     </ol>
+    <p>Open <b>Settings → Tools → Pi Terminal Bridge</b> to pick the model, thinking level, launch options, and bridge features.</p>
 
-    <h4>Configuration</h4>
-    <p>Open <b>Settings, Tools, Pi Terminal Bridge</b> to pick the model, thinking level, launch options, and bridge features.</p>
-
-    <h3>Keyboard Shortcuts</h3>
+    <h3>Keyboard shortcuts</h3>
     <ul>
         <li><code>Ctrl+Shift+P</code> — Open the Pi conversation window</li>
         <li><code>Alt+Shift+3</code> — Send selection / file to Pi</li>
     </ul>
-    <p>Both are rebindable in <b>Settings, Keymap, Pi Terminal Bridge</b>.</p>
+    <p>Both are rebindable in <b>Settings → Keymap → Pi Terminal Bridge</b>.</p>
 
     <h3>Supported IDEs</h3>
     <p>Works with all JetBrains IDEs: IntelliJ IDEA, GoLand, PyCharm, WebStorm, PhpStorm, CLion, Rider, RubyMine, and more.</p>
+
+    <hr/>
+
+    <h2>Pi Terminal Bridge（pi 终端桥）</h2>
+    <p>
+        为 JetBrains IDE 提供 <a href="https://pi.dev">Pi coding agent</a> 的持久会话 —— 启动、跟踪与恢复会话，并在 IDE 与 pi 终端之间维持一条实时通道。Pi 标签页是真实终端里跑着完整的 pi TUI。可从编辑器发送代码上下文、选择模型，也可选在 Pi 改文件后自动打开。
+    </p>
+
+    <blockquote>
+        <b>前置条件：</b>使用本插件前请单独安装 Pi CLI。<br/>
+        <code>npm i -g @earendil-works/pi-coding-agent</code> 或访问 <a href="https://pi.dev">pi.dev</a>
+    </blockquote>
+
+    <h3>功能</h3>
+    <ul>
+        <li><b>持久会话</b> —— 会话跨 IDE 重启保留；点击即可重新拉起并恢复。启动时不会批量复活终端。</li>
+        <li><b>实时桥接</b> —— working/idle 徽标、当前模型，以及终端内 <code>/new</code>、<code>/fork</code>、<code>/resume</code> 换绑都会同步到 IDE 面板；旧会话归档后仍可恢复</li>
+        <li><b>一键启动</b> —— 工具栏按钮在 Terminal 工具窗中打开专属 Pi 标签页</li>
+        <li><b>发送到 Pi</b> —— 选中代码，右键发送文件引用（<code>@path/file.go#L10-25</code>）到 Pi 输入栏。面板输入栏也有右键菜单，并接受从 Project 视图拖入的文件。</li>
+        <li><b>通知</b> —— 可选：agent 结束时气泡提醒（仅 IDE 在后台时弹出；点击可定位到对应终端）；可选打开 Pi 改过的文件</li>
+        <li><b>灵活配置</b> —— 模型、thinking 级别与启动参数</li>
+    </ul>
+
+    <h3>快速上手</h3>
+    <ol>
+        <li>点击主工具栏的 <b>pi</b> 按钮（或按 <code>Ctrl+Shift+P</code>）。</li>
+        <li>Terminal 工具窗中打开专属 Pi 标签页，自动运行 <code>pi</code>。</li>
+        <li>选中代码，右键 → <b>Send to Pi</b>，把文件上下文加入提示。</li>
+        <li>关闭并重开 IDE —— 面板中列出全部会话，点击即可恢复。</li>
+    </ol>
+    <p>打开 <b>Settings → Tools → Pi Terminal Bridge</b> 可选择模型、thinking 级别、启动选项和桥接功能。</p>
+
+    <h3>快捷键</h3>
+    <ul>
+        <li><code>Ctrl+Shift+P</code> —— 打开 Pi 会话窗口</li>
+        <li><code>Alt+Shift+3</code> —— 发送选中内容 / 文件到 Pi</li>
+    </ul>
+    <p>均可在 <b>Settings → Keymap → Pi Terminal Bridge</b> 中修改。</p>
+
+    <h3>支持的 IDE</h3>
+    <p>适用于所有 JetBrains IDE：IntelliJ IDEA、GoLand、PyCharm、WebStorm、PhpStorm、CLion、Rider、RubyMine 等。</p>
         ]]></description>
 
     <change-notes><![CDATA[
