@@ -44,7 +44,7 @@ Terminal tab  ──  ~/.pi/agent/extensions/pi-launcher-bridge.ts (lazy-install
 1. Click the **pi** button in the main toolbar (or press `Ctrl+Shift+P`).
 2. A new Pi tab opens in the Terminal window and runs `pi` automatically.
 3. Select code in the editor, right-click → **Send to Pi** — a file reference (`@path/file.go#L10-25`) is appended to Pi's input. The panel input also has a context menu (insert current file / selection / open files) and accepts files dropped from the Project view.
-4. Close and reopen the IDE — conversations are listed in the Pi panel; clicking one relaunches the terminal (the pi TUI respawns) and resumes the session with `pi --session <id>`. In the Pi terminal, **Ctrl-click** `path:line` (and `path:line:column`) to open that location.
+4. Close and reopen the IDE — conversations are listed in the Pi panel; clicking one relaunches the terminal (the pi TUI respawns) and resumes the session with `pi --session <id>`.
 
 > Terminals are not batch-revived at IDE startup; each conversation is resumed
 > on demand — click it (or Send) and its terminal respawns the pi TUI with the

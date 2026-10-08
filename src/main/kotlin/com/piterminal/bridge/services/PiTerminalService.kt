@@ -163,7 +163,6 @@ class PiTerminalService(private val project: Project) : Disposable {
             String::class.java
         )
         val widget = createMethod.invoke(manager, workingDir, tabName)
-        installPathHyperlinks(widget)
         val component = widget.javaClass.getMethod("getComponent").invoke(widget) as JComponent
 
         val session = TerminalSession(
@@ -198,28 +197,6 @@ class PiTerminalService(private val project: Project) : Disposable {
         monitorProcess(session, widget)
         listeners.forEach { it.onSessionStarted(conversationId) }
         logger.info("Pi terminal tab created: $tabName")
-    }
-
-    /**
-     * Classic JediTerm (what createLocalShellWidget always returns) does not
-     * get Reworked-2025's built-in path links. Attach FILE_PATH:LINE filters
-     * when the widget exposes addMessageFilter; skip silently otherwise.
-     */
-    private fun installPathHyperlinks(widget: Any) {
-        try {
-            val filterClass = Class.forName("com.intellij.execution.filters.Filter")
-            val regexpClass = Class.forName("com.intellij.execution.filters.RegexpFilter")
-            val add = widget.javaClass.getMethod("addMessageFilter", filterClass)
-            val ctor = regexpClass.getConstructor(Project::class.java, String::class.java)
-            val file = regexpClass.getField("FILE_PATH_MACROS").get(null) as String
-            val line = regexpClass.getField("LINE_MACROS").get(null) as String
-            val column = regexpClass.getField("COLUMN_MACROS").get(null) as String
-            for (pattern in listOf("$file:$line:$column", "$file:$line")) {
-                add.invoke(widget, ctor.newInstance(project, pattern))
-            }
-        } catch (e: Exception) {
-            logger.info("Path hyperlinks not attached: ${e.message}")
-        }
     }
 
     private fun findContent(session: TerminalSession): Content? {
