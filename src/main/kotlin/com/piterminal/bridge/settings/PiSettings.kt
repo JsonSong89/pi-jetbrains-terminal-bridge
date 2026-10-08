@@ -11,7 +11,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 import javax.swing.text.StyleContext
 
 /**
- * Persistent settings for Pi Agent plugin.
+ * Persistent settings for Pi Terminal Bridge.
  * Storage name was reset so older XML (boolean defaults that could not persist
  * unchecked options) is ignored.
  */

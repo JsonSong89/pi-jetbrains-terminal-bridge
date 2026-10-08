@@ -20,7 +20,7 @@
         <li><b>Live bridge</b> — working/idle badges, current model, and session switches (<code>/new</code>, <code>/fork</code>) reflected in the IDE panel in real time; old sessions archived and resumable</li>
         <li><b>One-click launch</b> from the toolbar in a dedicated Terminal tab</li>
         <li><b>Send to Pi</b> — select code, right-click, and send file reference (<code>@path/file.go#L10-25</code>) to Pi's input</li>
-        <li><b>Notifications</b> — optional balloon when the agent finishes; optionally open files Pi edited</li>
+        <li><b>Notifications</b> — optional balloon when the agent finishes (only while the IDE is in the background; click to focus that terminal); optionally open files Pi edited</li>
         <li><b>Flexible configuration</b> for models, thinking levels, and launch options</li>
     </ul>
 
@@ -38,9 +38,10 @@
 
     <h3>Keyboard Shortcuts</h3>
     <ul>
-        <li><code>Ctrl+Shift+`</code> — Open the Pi conversation window</li>
-        <li><code>Ctrl+Shift+L</code> — Send selection / file to Pi</li>
+        <li><code>Ctrl+Shift+P</code> — Open the Pi conversation window</li>
+        <li><code>Alt+Shift+3</code> — Send selection / file to Pi</li>
     </ul>
+    <p>Both are rebindable in <b>Settings, Keymap, Pi Terminal Bridge</b>.</p>
 
     <h3>Supported IDEs</h3>
     <p>Works with all JetBrains IDEs: IntelliJ IDEA, GoLand, PyCharm, WebStorm, PhpStorm, CLion, Rider, RubyMine, and more.</p>
@@ -53,6 +54,11 @@
         <li>Persistent conversations: sessions survive IDE restarts, click to relaunch and resume</li>
         <li>Live IDEA-pi bridge: working/idle badges, model display, session rebind on <code>/new</code>/<code>/fork</code> with old session archived</li>
         <li>Settings: agent-finish notifications and auto-open modified files (both opt-in)</li>
+        <li>Finish notifications fire only when the IDE is in the background; click the balloon to focus that terminal</li>
+        <li>Status bar shows how many conversations are working</li>
+        <li>Clear warnings when Extra arguments conflict with session flags, or when the Windows Terminal shell is cmd.exe</li>
+        <li>Panel input: context menu and drag-and-drop files as <code>@path</code> refs</li>
+        <li>Ctrl-click <code>path:line</code> in the Pi terminal opens the file</li>
     </ul>
         ]]></change-notes>
 
@@ -65,7 +71,7 @@
         <projectService serviceImplementation="com.piterminal.bridge.conversations.PiConversationStore"/>
         <projectService serviceImplementation="com.piterminal.bridge.bridge.PiBridgeServer"/>
 
-        <toolWindow id="Pi Agent"
+        <toolWindow id="Pi Bridge"
                     displayName="Pi Bridge"
                     anchor="right"
                     icon="/icons/pi.svg"
@@ -84,9 +90,9 @@
                 implementation="com.piterminal.bridge.services.PiStatusWidgetFactory"
                 order="after position"/>
 
-        <notificationGroup id="Pi Agent"
+        <notificationGroup id="Pi Bridge"
                            displayType="BALLOON"
-                           toolWindowId="Pi Agent"/>
+                           toolWindowId="Pi Bridge"/>
     </extensions>
 
     <actions>

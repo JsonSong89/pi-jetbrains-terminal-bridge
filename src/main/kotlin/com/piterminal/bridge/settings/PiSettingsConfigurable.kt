@@ -3,6 +3,7 @@ package com.piterminal.bridge.settings
 import com.intellij.openapi.options.Configurable
 import com.intellij.openapi.project.ProjectManager
 import com.intellij.openapi.ui.ComboBox
+import com.intellij.openapi.util.SystemInfo
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBTextField
 import com.intellij.util.ui.FormBuilder
@@ -11,7 +12,7 @@ import com.piterminal.bridge.bridge.PiBridgeInstaller
 import javax.swing.*
 
 /**
- * Settings UI: Settings → Tools → Pi Agent
+ * Settings UI: Settings → Tools → Pi Terminal Bridge
  */
 class PiSettingsConfigurable : Configurable {
 
@@ -68,7 +69,7 @@ class PiSettingsConfigurable : Configurable {
             preferredSize = java.awt.Dimension(400, preferredSize.height)
         }
         extraArgsField = JBTextField(settings.extraArgs).apply {
-            emptyText.text = "e.g. --no-themes --verbose"
+            emptyText.text = "e.g. --no-themes — not --session / --resume"
         }
         sendShortcutCombo = ComboBox(SEND_SHORTCUTS).apply {
             selectedItem = if (settings.sendWithCtrlEnter) SEND_CTRL_ENTER else SEND_ENTER
@@ -82,7 +83,10 @@ class PiSettingsConfigurable : Configurable {
                 1
             )
         )
-        notifyAgentEndCheck = JCheckBox("Notify when the agent finishes", settings.notifyOnAgentEnd)
+        notifyAgentEndCheck = JCheckBox(
+            "Notify when the agent finishes (only if the IDE is in the background; click to focus the terminal)",
+            settings.notifyOnAgentEnd
+        )
         openModifiedFilesCheck = JCheckBox("Open files modified by Pi in the editor", settings.openModifiedFiles)
 
         panel = FormBuilder.createFormBuilder()
@@ -112,6 +116,10 @@ class PiSettingsConfigurable : Configurable {
             })
             .addLabeledComponent(JBLabel("Pi command:"), piCommandField!!, 1, false)
             .addLabeledComponent(JBLabel("Extra arguments:"), extraArgsField!!, 1, false)
+            .addComponentToRightColumn(JBLabel("Do not pass --session, --session-id, --resume, --continue or --fork; the plugin sets those. Conflicting flags are dropped at launch.").apply {
+                foreground = JBUI.CurrentTheme.ContextHelp.FOREGROUND
+                font = JBUI.Fonts.smallFont()
+            }, 0)
 
             // Options section
             .addSeparator()
@@ -202,7 +210,10 @@ class PiSettingsConfigurable : Configurable {
             ?.let { com.piterminal.bridge.bridge.PiBridgeServer.getInstance(it).endpoint() }
             ?.let { "server listening on 127.0.0.1:${it.port}" }
             ?: "server not started — starts with the first Pi terminal"
-        return "$extension\n$server"
+        val windows = if (SystemInfo.isWindows) {
+            "\nWindows: use PowerShell (or Git Bash) as the IDE Terminal shell; cmd.exe cannot run the live bridge."
+        } else ""
+        return "$extension\n$server$windows"
     }
 
     override fun disposeUIResources() {

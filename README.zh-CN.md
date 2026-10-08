@@ -18,7 +18,7 @@
 - **一键启动** —— 工具栏按钮在 Terminal 工具窗中打开专属 Pi 标签页，按配置的模型 / thinking 级别 / 额外参数运行 `pi`。
 - **发送到 Pi** —— 编辑器选中代码，右键 → *Send to Pi*，文件引用（`@path/file.go#L10-25`）直达 Pi 输入框。
 - **通知（默认关闭，需在设置中开启）**
-  - agent 结束时气泡通知（含出错 / 中止原因）
+  - agent 结束时气泡通知（含出错 / 中止原因）——仅 IDE 在后台时弹出；点击可定位到对应终端
   - 自动刷新并在编辑器中打开 Pi 修改过的文件
 - **诊断** —— 设置页展示桥接 extension 状态与服务端口。
 
@@ -43,8 +43,8 @@ Terminal 标签页 ── ~/.pi/agent/extensions/pi-launcher-bridge.ts（懒安�
 
 1. 点击主工具栏的 **pi** 按钮（或按 `Ctrl+Shift+P`）。
 2. Terminal 工具窗中打开专属 Pi 标签页，自动运行 `pi`。
-3. 编辑器选中代码，右键 → **发送到 Pi** —— 文件引用（`@path/file.go#L10-25`）追加到 Pi 输入栏。
-4. 关闭并重开 IDE —— 面板中列出全部会话，点击即重新拉起终端（pi TUI 重新启动）并用 `pi --session <id>` 恢复会话。
+3. 编辑器选中代码，右键 → **发送到 Pi** —— 文件引用（`@path/file.go#L10-25`）追加到 Pi 输入栏。面板输入栏也有右键菜单（插入当前文件 / 选区 / 已打开文件），并接受从 Project 视图拖入的文件。
+4. 关闭并重开 IDE —— 面板中列出全部会话，点击即重新拉起终端（pi TUI 重新启动）并用 `pi --session <id>` 恢复会话。Pi 终端里 **Ctrl-click** `path:line`（以及 `path:line:column`）可打开对应位置。
 
 > IDE 启动时不会批量复活终端，而是按需恢复：点击会话（或 Send）时才拉起对应 terminal，pi TUI 重启并接回原会话。
 
@@ -68,7 +68,7 @@ Pi 标签页是**真实终端里跑着完整的 pi TUI** —— 所有斜杠命�
 | 配置项 | 说明 |
 |---|---|
 | 模型 / thinking 级别 / 额外参数 | 启动时传给 `pi` CLI |
-| Agent 结束通知 | 会话 agent 落定时气泡提醒（默认关） |
+| Agent 结束通知 | 会话 agent 落定时气泡提醒（默认关；仅 IDE 在后台时弹出；点击可定位到对应终端） |
 | 打开 Pi 修改的文件 | 写入后刷新并在编辑器打开（默认关） |
 | 桥接诊断 | 只读：extension 状态 + 服务端口 |
 
@@ -95,7 +95,7 @@ JDK 21 toolchain，IntelliJ Platform Gradle Plugin 2.x，目标 2026.1，`sinceB
 
 - 会话模型：稳定 `id`（tabKey / 主键）+ 可换绑的 `piSessionId` —— `/new` 换 pi 会话，tab 身份不变。
 - pi 的 jsonl 文件是数据权威，插件只存索引。
-- 已知限制：Windows 假定 PowerShell（JetBrains 默认 shell）；POSIX 侧用 `env VAR=.. pi` 前缀覆盖 bash/zsh/fish。
+- 已知限制：Windows 上实时桥接按 PowerShell（`$env:…`）或 Git Bash（`env`）注入。若终端是 cmd.exe，会跳过注入并给出警告。Extra arguments 里的 `--session` / `--resume` 会在启动时丢掉——会话由面板接管。
 
 ## 致谢
 

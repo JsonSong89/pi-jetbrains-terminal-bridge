@@ -5,6 +5,7 @@ import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.project.DumbAware
+import com.piterminal.bridge.PiFileRefs
 import com.piterminal.bridge.conversations.PiConversationService
 
 /**
@@ -16,32 +17,11 @@ class SendSelectionAction : AnAction(), DumbAware {
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
         val editor = e.getData(CommonDataKeys.EDITOR) ?: return
-        val selectionModel = editor.selectionModel
         val virtualFile = e.getData(CommonDataKeys.VIRTUAL_FILE)
             ?: e.getData(CommonDataKeys.PSI_FILE)?.virtualFile
             ?: return
-
-        val projectPath = project.basePath ?: ""
-        val filePath = virtualFile.path
-        val relativePath = if (filePath.startsWith(projectPath)) {
-            filePath.removePrefix(projectPath).removePrefix("/")
-        } else {
-            filePath
-        }
-
-        val reference = if (!selectionModel.hasSelection()) {
-            "@$relativePath"
-        } else {
-            val startLine = editor.document.getLineNumber(selectionModel.selectionStart) + 1
-            val endLine = editor.document.getLineNumber(selectionModel.selectionEnd) + 1
-            if (startLine == endLine) {
-                "@$relativePath#L$startLine"
-            } else {
-                "@$relativePath#L$startLine-$endLine"
-            }
-        }
-
-        PiConversationService.getInstance(project).appendToDraft(reference)
+        PiConversationService.getInstance(project)
+            .appendToDraft(PiFileRefs.atSelection(project, editor, virtualFile))
     }
 
     override fun update(e: AnActionEvent) {

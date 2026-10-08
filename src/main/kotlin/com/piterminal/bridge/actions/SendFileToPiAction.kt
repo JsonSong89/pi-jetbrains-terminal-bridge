@@ -13,6 +13,7 @@ import com.intellij.psi.PsiDirectory
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiFile
 import com.intellij.psi.PsiFileSystemItem
+import com.piterminal.bridge.PiFileRefs
 import com.piterminal.bridge.conversations.PiConversationService
 
 /**
@@ -29,18 +30,7 @@ class SendFileToPiAction : AnAction(), DumbAware {
         val virtualFiles = getFiles(e)
         if (virtualFiles.isEmpty()) return
 
-        val projectPath = project.basePath ?: ""
-        val references = virtualFiles
-            .distinctBy { it.path }
-            .joinToString("\n") { file ->
-                val relativePath = if (file.path.startsWith(projectPath)) {
-                    file.path.removePrefix(projectPath).removePrefix("/")
-                } else {
-                    file.path
-                }
-                "@$relativePath"
-            }
-
+        val references = PiFileRefs.atFiles(project, virtualFiles)
         if (references.isBlank()) return
         PiConversationService.getInstance(project).appendToDraft(references, block = true)
     }
@@ -77,19 +67,7 @@ class SendFileToPiAction : AnAction(), DumbAware {
             }
         }
 
-        return preferSelectedFiles(found)
-    }
-
-    /**
-     * IDE_VIEW / PSI often include the parent folder of a clicked file.
-     * Keep files when any exist; only send directories when nothing else was chosen.
-     */
-    private fun preferSelectedFiles(found: Set<VirtualFile>): List<VirtualFile> {
-        val files = found.filter { !it.isDirectory }
-        if (files.isNotEmpty()) {
-            return files
-        }
-        return found.filter { it.isDirectory }
+        return PiFileRefs.preferFiles(found)
     }
 
     private fun addPsiFile(found: MutableSet<VirtualFile>, element: PsiElement) {

@@ -13,6 +13,7 @@ import com.intellij.openapi.wm.ToolWindowManager
 import com.intellij.ui.content.Content
 import com.intellij.ui.content.ContentManagerEvent
 import com.intellij.ui.content.ContentManagerListener
+import com.piterminal.bridge.PiBridgeUi
 import com.piterminal.bridge.bridge.PiBridgeInstaller
 import com.piterminal.bridge.bridge.PiBridgeServer
 import com.piterminal.bridge.settings.PiSettings
@@ -152,6 +153,7 @@ class PiTerminalService(private val project: Project) : Disposable {
             String::class.java
         )
         val widget = createMethod.invoke(manager, workingDir, tabName)
+        installPathHyperlinks(widget)
         val component = widget.javaClass.getMethod("getComponent").invoke(widget) as JComponent
 
         val session = TerminalSession(
@@ -186,6 +188,28 @@ class PiTerminalService(private val project: Project) : Disposable {
         monitorProcess(session, widget)
         listeners.forEach { it.onSessionStarted(conversationId) }
         logger.info("Pi terminal tab created: $tabName")
+    }
+
+    /**
+     * Classic JediTerm (what createLocalShellWidget always returns) does not
+     * get Reworked-2025's built-in path links. Attach FILE_PATH:LINE filters
+     * when the widget exposes addMessageFilter; skip silently otherwise.
+     */
+    private fun installPathHyperlinks(widget: Any) {
+        try {
+            val filterClass = Class.forName("com.intellij.execution.filters.Filter")
+            val regexpClass = Class.forName("com.intellij.execution.filters.RegexpFilter")
+            val add = widget.javaClass.getMethod("addMessageFilter", filterClass)
+            val ctor = regexpClass.getConstructor(Project::class.java, String::class.java)
+            val file = regexpClass.getField("FILE_PATH_MACROS").get(null) as String
+            val line = regexpClass.getField("LINE_MACROS").get(null) as String
+            val column = regexpClass.getField("COLUMN_MACROS").get(null) as String
+            for (pattern in listOf("$file:$line:$column", "$file:$line")) {
+                add.invoke(widget, ctor.newInstance(project, pattern))
+            }
+        } catch (e: Exception) {
+            logger.info("Path hyperlinks not attached: ${e.message}")
+        }
     }
 
     private fun findContent(session: TerminalSession): Content? {
@@ -251,14 +275,27 @@ class PiTerminalService(private val project: Project) : Disposable {
 
         val settings = PiSettings.getInstance().state
         val resume = sessionFileExists(piSessionId, workingDir)
-        val extraArgs = sanitizeExtraArgs(settings.extraArgs)
+        val extra = sanitizeExtraArgs(settings.extraArgs)
+        if (extra.dropped.isNotEmpty()) {
+            val flags = extra.dropped.distinct().joinToString(", ")
+            showNotification(
+                "Dropped Extra arguments ($flags). Pi Bridge already sets the session — resume or start from the conversation panel, not via --session / --resume / --continue / --fork.",
+                NotificationType.WARNING
+            )
+        }
+
+        val shell = classifyTerminalShell()
+        if (shell == ShellKind.CMD) {
+            showNotification(
+                "The IDE Terminal shell looks like cmd.exe. Pi Bridge can only inject the live channel in PowerShell (or Git Bash). Pi will still start, but the panel will not stay in sync. Settings → Tools → Terminal → Shell path → powershell.exe",
+                NotificationType.WARNING
+            )
+        }
 
         val command = buildString {
-            // Env prefix for the bridge extension (PowerShell on Windows, POSIX shell otherwise).
-            if (endpoint != null) {
-                if (SystemInfo.isWindows) {
-                    // Assumes PowerShell, the JetBrains default shell on Windows.
-                    // cmd users: bridge silently inactive (documented limitation).
+            // Env prefix for the bridge extension. cmd.exe cannot parse it, so skip.
+            if (endpoint != null && shell != ShellKind.CMD) {
+                if (shell == ShellKind.POWERSHELL) {
                     append("\$env:PI_LAUNCHER_PORT='${endpoint.port}'; ")
                     append("\$env:PI_LAUNCHER_TOKEN='${endpoint.token}'; ")
                     append("\$env:PI_LAUNCHER_TAB_KEY='$conversationId'; ")
@@ -296,9 +333,9 @@ class PiTerminalService(private val project: Project) : Disposable {
                 append(quote(settings.thinkingLevel))
             }
 
-            if (extraArgs.isNotBlank()) {
+            if (extra.kept.isNotBlank()) {
                 append(" ")
-                append(extraArgs)
+                append(extra.kept)
             }
         }
 
@@ -367,10 +404,10 @@ class PiTerminalService(private val project: Project) : Disposable {
         reset(conversationId, notify = true)
         PiStatusWidget.update(project)
         val notification = NotificationGroupManager.getInstance()
-            .getNotificationGroup("Pi Agent")
+            .getNotificationGroup(PiBridgeUi.NOTIFICATION_GROUP_ID)
             .createNotification(
                 "$tabName process exited unexpectedly",
-                "Click to restart Pi",
+                "Click to restart Pi. On Windows, if the Terminal shell is cmd.exe, switch it to powershell.exe (Settings → Tools → Terminal) — otherwise the launch command fails.",
                 NotificationType.WARNING
             )
         notification.addAction(object : NotificationAction("Restart Pi") {
@@ -407,10 +444,55 @@ class PiTerminalService(private val project: Project) : Disposable {
     }
 
     private fun showNotification(message: String, type: NotificationType) {
-        NotificationGroupManager.getInstance()
-            .getNotificationGroup("Pi Agent")
-            .createNotification(message, type)
-            .notify(project)
+        PiBridgeUi.notify(project, message, type)
+    }
+
+    private enum class ShellKind { POWERSHELL, POSIX, CMD }
+
+    private fun classifyTerminalShell(): ShellKind {
+        if (!SystemInfo.isWindows) return ShellKind.POSIX
+        val path = detectTerminalShellPath()?.trim()?.trim('"') ?: return ShellKind.POWERSHELL
+        val base = shellExecutableName(path)
+        return when {
+            base == "cmd.exe" || base == "cmd" -> ShellKind.CMD
+            base == "powershell.exe" || base == "powershell" ||
+                base == "pwsh.exe" || base == "pwsh" -> ShellKind.POWERSHELL
+            base.contains("bash") || base == "zsh" || base == "fish" || base == "sh" -> ShellKind.POSIX
+            else -> ShellKind.POWERSHELL
+        }
+    }
+
+    private fun detectTerminalShellPath(): String? {
+        val specs = listOf(
+            Triple("org.jetbrains.plugins.terminal.TerminalProjectOptionsProvider", true, listOf("getShellPath", "getDefaultShellPath")),
+            Triple("org.jetbrains.plugins.terminal.TerminalOptionsProvider", false, listOf("getShellPath", "getShellPathOrDefault", "getDefaultShellPath"))
+        )
+        for ((className, needsProject, getters) in specs) {
+            try {
+                val cls = Class.forName(className)
+                val instance = if (needsProject) {
+                    cls.getMethod("getInstance", Project::class.java).invoke(null, project)
+                } else {
+                    cls.getMethod("getInstance").invoke(null)
+                } ?: continue
+                for (getter in getters) {
+                    try {
+                        val value = cls.getMethod(getter).invoke(instance) as? String
+                        if (!value.isNullOrBlank()) return value
+                    } catch (_: Exception) {
+                    }
+                }
+            } catch (_: Exception) {
+            }
+        }
+        return PiSettings.getInstance().state.shellPath.takeIf { it.isNotBlank() }
+    }
+
+    private fun shellExecutableName(raw: String): String {
+        val trimmed = raw.trim().trim('"')
+        val exe = Regex("""(?i)([^\\/]+\.(?:exe|cmd|bat))\b""").find(trimmed)?.groupValues?.get(1)
+        val token = exe ?: trimmed.substringBefore(' ').replace('\\', '/').substringAfterLast('/')
+        return token.lowercase()
     }
 
     companion object {
@@ -435,25 +517,30 @@ class PiTerminalService(private val project: Project) : Disposable {
             false
         }
 
+        private data class SanitizedExtraArgs(val kept: String, val dropped: List<String>)
+
         /** Drops flags that would conflict with our --session-id/--session injection. */
-        private fun sanitizeExtraArgs(extraArgs: String): String {
-            if (extraArgs.isBlank()) return ""
+        private fun sanitizeExtraArgs(extraArgs: String): SanitizedExtraArgs {
+            if (extraArgs.isBlank()) return SanitizedExtraArgs("", emptyList())
             val valueFlags = setOf("--session", "--session-id", "--fork")
             val keep = mutableListOf<String>()
-            val tokens = extraArgs.trim().split(Regex("\\s+")).toMutableList()
+            val dropped = mutableListOf<String>()
+            val tokens = extraArgs.trim().split(Regex("\\s+"))
             var skipNext = false
             for (token in tokens) {
                 if (skipNext) {
                     skipNext = false
                     continue
                 }
-                if (token in CONFLICT_FLAGS) {
-                    skipNext = token in valueFlags
+                val flag = token.substringBefore('=')
+                if (flag in CONFLICT_FLAGS) {
+                    dropped.add(flag)
+                    skipNext = flag in valueFlags && !token.contains('=')
                     continue
                 }
                 keep.add(token)
             }
-            return keep.joinToString(" ")
+            return SanitizedExtraArgs(keep.joinToString(" "), dropped)
         }
 
         private val CONFLICT_FLAGS = setOf("--continue", "--resume", "--session", "--session-id", "--fork")

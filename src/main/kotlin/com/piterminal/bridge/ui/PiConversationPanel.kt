@@ -1,6 +1,7 @@
 package com.piterminal.bridge.ui
 
 import com.intellij.icons.AllIcons
+import com.intellij.ide.dnd.FileCopyPasteUtil
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.actionSystem.ActionManager
 import com.intellij.openapi.actionSystem.ActionUpdateThread
@@ -11,6 +12,7 @@ import com.intellij.openapi.actionSystem.DefaultActionGroup
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.editor.colors.EditorColorsListener
 import com.intellij.openapi.editor.colors.EditorColorsManager
+import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.ide.CopyPasteManager
 import com.intellij.openapi.project.DumbAware
@@ -18,18 +20,26 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.ComboBox
 import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.ui.SimpleToolWindowPanel
+import com.intellij.openapi.vfs.LocalFileSystem
+import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.ui.JBColor
 import com.intellij.ui.JBSplitter
+import com.intellij.ui.PopupHandler
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTextArea
 import com.intellij.util.ui.JBUI
+import java.awt.datatransfer.DataFlavor
 import java.awt.datatransfer.StringSelection
+import java.awt.datatransfer.Transferable
+import java.awt.datatransfer.Clipboard
+import com.piterminal.bridge.PiFileRefs
 import com.piterminal.bridge.conversations.PiConversation
 import com.piterminal.bridge.conversations.PiConversationService
 import com.piterminal.bridge.conversations.PiUserMessage
 import com.piterminal.bridge.conversations.PiConversationService.ChangeKind
 import com.piterminal.bridge.settings.PiSettings
+import javax.swing.TransferHandler
 import java.awt.BorderLayout
 import java.awt.Component
 import java.awt.Dimension
@@ -222,6 +232,8 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
             inputArea,
             this
         )
+        installInputContextMenu()
+        installInputFileDrop()
 
         sendButton.addActionListener { sendDraft() }
         copyInputButton.addActionListener { copyInputToClipboard() }
@@ -431,6 +443,165 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
         CopyPasteManager.getInstance().setContents(StringSelection(inputArea.text))
     }
 
+    private fun installInputContextMenu() {
+        val group = DefaultActionGroup().apply {
+            add(object : AnAction("Cut", "Cut selected text", AllIcons.Actions.MenuCut), DumbAware {
+                override fun actionPerformed(e: AnActionEvent) { inputArea.cut() }
+                override fun update(e: AnActionEvent) {
+                    e.presentation.isEnabled = inputArea.isEnabled && !inputArea.selectedText.isNullOrEmpty()
+                }
+                override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.EDT
+            })
+            add(object : AnAction("Copy", "Copy selected text", AllIcons.Actions.Copy), DumbAware {
+                override fun actionPerformed(e: AnActionEvent) { inputArea.copy() }
+                override fun update(e: AnActionEvent) {
+                    e.presentation.isEnabled = inputArea.isEnabled && !inputArea.selectedText.isNullOrEmpty()
+                }
+                override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.EDT
+            })
+            add(object : AnAction("Paste", "Paste clipboard text", AllIcons.Actions.MenuPaste), DumbAware {
+                override fun actionPerformed(e: AnActionEvent) { inputArea.paste() }
+                override fun update(e: AnActionEvent) {
+                    e.presentation.isEnabled = inputArea.isEnabled
+                }
+                override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.EDT
+            })
+            addSeparator()
+            add(object : AnAction("Insert current file", "Append @path for the active editor file", AllIcons.FileTypes.Text), DumbAware {
+                override fun actionPerformed(e: AnActionEvent) {
+                    val file = currentEditorFile() ?: return
+                    conversations.appendToDraft(PiFileRefs.atFile(project, file))
+                }
+                override fun update(e: AnActionEvent) {
+                    e.presentation.isEnabled = inputArea.isEnabled && currentEditorFile() != null
+                }
+                override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.EDT
+            })
+            add(object : AnAction("Insert selection", "Append @path#L for the editor selection", AllIcons.Actions.ShowSource), DumbAware {
+                override fun actionPerformed(e: AnActionEvent) {
+                    val editor = FileEditorManager.getInstance(project).selectedTextEditor ?: return
+                    val file = FileDocumentManager.getInstance().getFile(editor.document) ?: return
+                    conversations.appendToDraft(PiFileRefs.atSelection(project, editor, file))
+                }
+                override fun update(e: AnActionEvent) {
+                    val editor = FileEditorManager.getInstance(project).selectedTextEditor
+                    e.presentation.isEnabled = inputArea.isEnabled &&
+                        editor != null &&
+                        FileDocumentManager.getInstance().getFile(editor.document) != null
+                }
+                override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.EDT
+            })
+            add(object : AnAction("Insert open files", "Append the workspace-open-files block", AllIcons.General.OpenDisk), DumbAware {
+                override fun actionPerformed(e: AnActionEvent) { appendOpenWorkspaceFiles() }
+                override fun update(e: AnActionEvent) {
+                    e.presentation.isEnabled = inputArea.isEnabled
+                }
+                override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.EDT
+            })
+            addSeparator()
+            add(object : AnAction("Send", "Send the draft to Pi", AllIcons.Actions.Execute), DumbAware {
+                override fun actionPerformed(e: AnActionEvent) { sendDraft() }
+                override fun update(e: AnActionEvent) {
+                    e.presentation.isEnabled = inputArea.isEnabled && inputArea.text.isNotBlank()
+                }
+                override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.EDT
+            })
+            add(object : AnAction("Clear draft", "Clear the input", AllIcons.General.Reset), DumbAware {
+                override fun actionPerformed(e: AnActionEvent) {
+                    inputArea.text = ""
+                    persistDraft()
+                }
+                override fun update(e: AnActionEvent) {
+                    e.presentation.isEnabled = inputArea.isEnabled && inputArea.text.isNotEmpty()
+                }
+                override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.EDT
+            })
+        }
+        PopupHandler.installPopupMenu(inputArea, group, "PiBridge.InputArea")
+    }
+
+    private fun installInputFileDrop() {
+        val textHandler = inputArea.transferHandler
+        inputArea.transferHandler = object : TransferHandler() {
+            override fun canImport(support: TransferSupport): Boolean {
+                if (!inputArea.isEnabled) return false
+                if (droppedFiles(support.transferable).isNotEmpty()) return true
+                return textHandler?.canImport(support) == true
+            }
+
+            override fun importData(support: TransferSupport): Boolean {
+                val files = droppedFiles(support.transferable)
+                if (files.isNotEmpty()) {
+                    val refs = PiFileRefs.atFiles(project, files)
+                    if (refs.isNotBlank()) {
+                        conversations.appendToDraft(refs, block = true)
+                        return true
+                    }
+                }
+                return textHandler?.importData(support) == true
+            }
+
+            override fun canImport(comp: JComponent, flavors: Array<DataFlavor>): Boolean {
+                if (!inputArea.isEnabled) return false
+                if (FileCopyPasteUtil.isFileListFlavorAvailable(flavors)) return true
+                return textHandler?.canImport(comp, flavors) == true
+            }
+
+            override fun importData(comp: JComponent, t: Transferable): Boolean {
+                val files = droppedFiles(t)
+                if (files.isNotEmpty()) {
+                    val refs = PiFileRefs.atFiles(project, files)
+                    if (refs.isNotBlank()) {
+                        conversations.appendToDraft(refs, block = true)
+                        return true
+                    }
+                }
+                return textHandler?.importData(comp, t) == true
+            }
+
+            override fun getSourceActions(c: JComponent): Int =
+                textHandler?.getSourceActions(c) ?: COPY
+
+            override fun exportToClipboard(comp: JComponent, clip: Clipboard, action: Int) {
+                textHandler?.exportToClipboard(comp, clip, action)
+            }
+        }
+    }
+
+    private fun droppedFiles(transferable: Transferable): List<VirtualFile> {
+        val local = LocalFileSystem.getInstance()
+        val fromList = try {
+            val ioFiles = FileCopyPasteUtil.getFileList(transferable) ?: emptyList()
+            ioFiles.mapNotNull { io ->
+                local.refreshAndFindFileByIoFile(io) ?: local.findFileByIoFile(io)
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+        if (fromList.isNotEmpty()) return fromList
+
+        val found = mutableListOf<VirtualFile>()
+        for (flavor in transferable.transferDataFlavors) {
+            val data = try {
+                transferable.getTransferData(flavor)
+            } catch (_: Exception) {
+                continue
+            }
+            when (data) {
+                is VirtualFile -> found.add(data)
+                is Array<*> -> found.addAll(data.filterIsInstance<VirtualFile>())
+                is Collection<*> -> found.addAll(data.filterIsInstance<VirtualFile>())
+            }
+        }
+        return found
+    }
+
+    private fun currentEditorFile(): VirtualFile? {
+        FileEditorManager.getInstance(project).selectedFiles.firstOrNull()?.let { return it }
+        val editor = FileEditorManager.getInstance(project).selectedTextEditor ?: return null
+        return FileDocumentManager.getInstance().getFile(editor.document)
+    }
+
     private fun appendOpenWorkspaceFiles() {
         persistDraft()
         val projectPath = project.basePath ?: ""
@@ -445,7 +616,7 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
             }
             .distinct()
         if (paths.isEmpty()) {
-            Messages.showInfoMessage(project, "No open workspace files.", "Pi Agent")
+            Messages.showInfoMessage(project, "No open workspace files.", "Pi Bridge")
             return
         }
         conversations.appendWorkspaceFiles(paths)

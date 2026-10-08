@@ -1,6 +1,5 @@
 package com.piterminal.bridge.conversations
 
-import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
@@ -10,6 +9,7 @@ import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFileManager
 import com.intellij.openapi.wm.ToolWindowManager
+import com.piterminal.bridge.PiBridgeUi
 import com.piterminal.bridge.services.PiStatusWidget
 import com.piterminal.bridge.services.PiTerminalService
 import com.piterminal.bridge.settings.PiSettings
@@ -95,6 +95,8 @@ class PiConversationService(private val project: Project) {
     fun get(id: String): PiConversation? = synchronized(conversations) { conversations[id] }
 
     fun isAgentWorking(id: String): Boolean = synchronized(workingIds) { id in workingIds }
+
+    fun workingCount(): Int = synchronized(workingIds) { workingIds.size }
 
     fun currentModel(id: String? = null): String? = synchronized(models) {
         models[id ?: activeId]
@@ -244,6 +246,20 @@ class PiConversationService(private val project: Project) {
         terminal().selectTab(id, requestFocus = true)
     }
 
+    /** Select the conversation and focus its Terminal tab, relaunching if needed. */
+    fun revealTerminal(id: String) {
+        get(id) ?: return
+        synchronized(conversations) {
+            if (conversations.containsKey(id)) activeId = id
+        }
+        persist()
+        if (!terminal().isAlive(id)) {
+            restoreTerminal(id)
+        }
+        terminal().selectTab(id, requestFocus = true)
+        notifyListeners(ChangeEvent(ChangeKind.STRUCTURE, id))
+    }
+
     fun checkTerminal(id: String): Boolean {
         val conversation = get(id) ?: return false
         if (terminal().isAlive(id)) {
@@ -345,17 +361,27 @@ class PiConversationService(private val project: Project) {
     fun onBridgeAgentState(tabKey: String, state: String, stopReason: String? = null) {
         val conversation = get(tabKey) ?: return
         val working = state == "working"
-        synchronized(workingIds) {
+        val becameIdle = synchronized(workingIds) {
+            val wasWorking = tabKey in workingIds
             if (working) workingIds.add(tabKey) else workingIds.remove(tabKey)
+            wasWorking && !working
         }
         notifyListeners(ChangeEvent(ChangeKind.STATE, tabKey))
-        if (!working && PiSettings.getInstance().state.notifyOnAgentEnd) {
+        PiStatusWidget.update(project)
+        if (becameIdle && PiSettings.getInstance().state.notifyOnAgentEnd && !PiBridgeUi.isIdeActive(project)) {
             val detail = when (stopReason) {
                 "error" -> " (stopped with an error)"
                 "aborted" -> " (aborted)"
                 else -> ""
             }
-            showNotification("${conversation.title} finished.$detail", NotificationType.INFORMATION)
+            PiBridgeUi.notifyOpenTerminal(
+                project,
+                conversation.title,
+                "Agent finished$detail.",
+                NotificationType.INFORMATION
+            ) {
+                revealTerminal(conversation.id)
+            }
         }
     }
 
@@ -498,14 +524,11 @@ class PiConversationService(private val project: Project) {
     }
 
     private fun showNotification(message: String, type: NotificationType) {
-        NotificationGroupManager.getInstance()
-            .getNotificationGroup("Pi Agent")
-            .createNotification(message, type)
-            .notify(project)
+        PiBridgeUi.notify(project, message, type)
     }
 
     companion object {
-        const val TOOL_WINDOW_ID = "Pi Agent"
+        const val TOOL_WINDOW_ID = PiBridgeUi.TOOL_WINDOW_ID
         const val ARCHIVED_SUFFIX = " (archived)"
         const val WORKSPACE_START = "<workspace-open-files>"
         const val WORKSPACE_END = "</workspace-open-files>"

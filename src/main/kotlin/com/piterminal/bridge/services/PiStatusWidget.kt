@@ -10,7 +10,7 @@ import com.piterminal.bridge.conversations.PiConversationService
 import java.awt.event.MouseEvent
 
 /**
- * Status bar widget showing Pi running state.
+ * Status bar widget showing how many Pi conversations are currently working.
  */
 class PiStatusWidgetFactory : StatusBarWidgetFactory {
 
@@ -36,20 +36,20 @@ class PiStatusWidget(private val project: Project) : StatusBarWidget, StatusBarW
     override fun getPresentation(): StatusBarWidget.WidgetPresentation = this
 
     override fun getText(): String {
-        val running = PiTerminalService.getInstance(project).runningCount()
+        val working = PiConversationService.getInstance(project).workingCount()
         return when {
-            running <= 0 -> "π Idle"
-            running == 1 -> "π Running"
-            else -> "π $running Running"
+            working <= 0 -> "π Idle"
+            working == 1 -> "π Working"
+            else -> "π $working Working"
         }
     }
 
     override fun getTooltipText(): String {
-        val running = PiTerminalService.getInstance(project).runningCount()
-        return if (running > 0) {
-            "Pi Agent: $running terminal(s) running. Click to open conversations."
+        val working = PiConversationService.getInstance(project).workingCount()
+        return if (working > 0) {
+            "Pi Bridge: $working conversation(s) working. Click to open the panel."
         } else {
-            "Pi Agent is idle. Click to open conversations."
+            "Pi Bridge is idle. Click to open the panel."
         }
     }
 

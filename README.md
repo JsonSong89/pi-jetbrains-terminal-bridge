@@ -18,7 +18,7 @@
 - **One-click launch** — the toolbar button opens a dedicated Pi tab in the Terminal tool window and runs `pi` with your configured model / thinking level / extra args.
 - **Send to Pi** — select code in the editor, right-click → *Send to Pi*, and a file reference (`@path/file.go#L10-25`) lands in Pi's input.
 - **Notifications (opt-in)**
-  - balloon when the agent finishes (including error/abort reason)
+  - balloon when the agent finishes (including error/abort reason) — only while the IDE is in the background; click to focus that terminal
   - automatically refresh + open files Pi edited
 - **Diagnostics** — Settings shows the bridge extension state and server port.
 
@@ -43,8 +43,8 @@ Terminal tab  ──  ~/.pi/agent/extensions/pi-launcher-bridge.ts (lazy-install
 
 1. Click the **pi** button in the main toolbar (or press `Ctrl+Shift+P`).
 2. A new Pi tab opens in the Terminal window and runs `pi` automatically.
-3. Select code in the editor, right-click → **Send to Pi** — a file reference (`@path/file.go#L10-25`) is appended to Pi's input.
-4. Close and reopen the IDE — conversations are listed in the Pi panel; clicking one relaunches the terminal (the pi TUI respawns) and resumes the session with `pi --session <id>`.
+3. Select code in the editor, right-click → **Send to Pi** — a file reference (`@path/file.go#L10-25`) is appended to Pi's input. The panel input also has a context menu (insert current file / selection / open files) and accepts files dropped from the Project view.
+4. Close and reopen the IDE — conversations are listed in the Pi panel; clicking one relaunches the terminal (the pi TUI respawns) and resumes the session with `pi --session <id>`. In the Pi terminal, **Ctrl-click** `path:line` (and `path:line:column`) to open that location.
 
 > Terminals are not batch-revived at IDE startup; each conversation is resumed
 > on demand — click it (or Send) and its terminal respawns the pi TUI with the
@@ -73,7 +73,7 @@ power — combine them freely.
 | Setting | Description |
 |---|---|
 | Model / thinking level / extra args | Passed to the `pi` CLI at launch |
-| Notify on agent end | Balloon when a conversation's agent settles (opt-in) |
+| Notify on agent end | Balloon when a conversation's agent settles (opt-in; only if the IDE is in the background; click to focus that terminal) |
 | Open files modified by Pi | Refresh + open in editor after writes (opt-in) |
 | Bridge diagnostics | Read-only: extension state + server port |
 
@@ -100,7 +100,7 @@ Architecture and decision records live in [`docs/tasks/`](docs/tasks/). Notably:
 
 - Conversation model: stable `id` (tab key / primary key) + rebindable `piSessionId` — `/new` swaps the pi session, the tab identity stays.
 - Pi's jsonl files are the source of truth; the plugin only stores an index.
-- Known limitation: Windows assumes PowerShell (the JetBrains default shell); POSIX shells use `env VAR=.. pi` prefix (bash/zsh/fish).
+- Known limitation: on Windows the live bridge injects PowerShell (`$env:…`) or POSIX `env` (Git Bash). cmd.exe is detected and skipped, with a warning. `--session` / `--resume` in Extra arguments are dropped at launch — the panel owns the session.
 
 ## Acknowledgements
 

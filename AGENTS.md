@@ -31,7 +31,7 @@ pi 侧 extension 源码以 Kotlin 常量内联在 `PiBridgeInstaller` 中，安�
 ## 核心设计（详见 docs/tasks/）
 
 - 会话 id 模型：conversation 有稳定 `id`（tabKey / 主键）+ `piSessionId`（当前绑定的 pi 会话，`/new` 等操作会换绑它；换绑时旧会话归档为 closed 条目，可复活）
-- 启动注入：`--session-id`（新会话）/ `--session`（resume，launch 时按 session 文件存在性判定）+ `--name` + `--session-dir`；env 前缀注入 `PI_LAUNCHER_PORT/TOKEN/TAB_KEY`（Windows PowerShell 与 POSIX `env` 两种语法，按 OS 分支；Windows 已知限制：cmd 不支持）
+- 启动注入：`--session-id`（新会话）/ `--session`（resume，launch 时按 session 文件存在性判定）+ `--name` + `--session-dir`；env 前缀注入 `PI_LAUNCHER_PORT/TOKEN/TAB_KEY`（Windows PowerShell 与 POSIX `env` 两种语法，按 OS 分支；cmd.exe 跳过注入并警告；Extra arguments 里的 `--session`/`--resume` 等冲突旗标会丢掉并警告）
 - 通道协议：`{v, seq, type, tabKey, token, data}` 通用信封；主版本号 + 未知 type 丢弃 + seq 按 `(tabKey, type)` 分域去重；token 校验
 - 兜底：resume 判定收敛在 launch 时刻（jsonl 必已落盘）；不做启动期清空 / mtime 重绑（terminal 进程随 IDE 关闭终止，理由见设计文档 §七）
 - rename 禁止重名（含归档标题查重）；删除会话不删 pi 侧 jsonl
