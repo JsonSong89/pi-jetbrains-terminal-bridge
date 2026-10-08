@@ -48,17 +48,22 @@
         ]]></description>
 
     <change-notes><![CDATA[
+    <h3>0.3.2</h3>
+    <ul>
+        <li>Finish notifications fire only when the IDE is in the background; click the balloon to focus that terminal</li>
+        <li>Status bar shows how many conversations are working</li>
+        <li>Panel input: context menu and drag-and-drop files as <code>@path</code> refs</li>
+        <li>Ctrl-click <code>path:line</code> in the Pi terminal opens the file</li>
+        <li>Clear warnings when Extra arguments conflict with session flags, or when the Windows Terminal shell is cmd.exe</li>
+        <li>Tool window / notification group renamed to <b>Pi Bridge</b></li>
+        <li>Fix: restore-terminal no longer calls Terminal <code>getShellPath</code> on the EDT</li>
+    </ul>
     <h3>0.3.1</h3>
     <ul>
         <li>New identity: renamed to <b>Pi Terminal Bridge</b> (<code>com.piterminal.bridge</code>); fresh start, earlier 0.x releases belong to the original pi-agent-launcher project</li>
         <li>Persistent conversations: sessions survive IDE restarts, click to relaunch and resume</li>
         <li>Live IDEA-pi bridge: working/idle badges, model display, session rebind on <code>/new</code>/<code>/fork</code> with old session archived</li>
         <li>Settings: agent-finish notifications and auto-open modified files (both opt-in)</li>
-        <li>Finish notifications fire only when the IDE is in the background; click the balloon to focus that terminal</li>
-        <li>Status bar shows how many conversations are working</li>
-        <li>Clear warnings when Extra arguments conflict with session flags, or when the Windows Terminal shell is cmd.exe</li>
-        <li>Panel input: context menu and drag-and-drop files as <code>@path</code> refs</li>
-        <li>Ctrl-click <code>path:line</code> in the Pi terminal opens the file</li>
     </ul>
         ]]></change-notes>
 
