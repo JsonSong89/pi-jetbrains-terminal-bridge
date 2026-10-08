@@ -477,7 +477,7 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
                 }
                 override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.EDT
             })
-            add(object : AnAction("Insert selection", "Append @path#L for the editor selection", AllIcons.Actions.ShowSource), DumbAware {
+            add(object : AnAction("Insert selection", "Append @path#L for the editor selection", AllIcons.Actions.Edit), DumbAware {
                 override fun actionPerformed(e: AnActionEvent) {
                     val editor = FileEditorManager.getInstance(project).selectedTextEditor ?: return
                     val file = FileDocumentManager.getInstance().getFile(editor.document) ?: return
