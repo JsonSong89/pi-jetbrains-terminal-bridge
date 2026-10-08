@@ -66,6 +66,7 @@
         <projectService serviceImplementation="com.piterminal.bridge.bridge.PiBridgeServer"/>
 
         <toolWindow id="Pi Agent"
+                    displayName="Pi Bridge"
                     anchor="right"
                     icon="/icons/pi.svg"
                     factoryClass="com.piterminal.bridge.ui.PiConversationToolWindowFactory"/>
@@ -89,20 +90,12 @@
     </extensions>
 
     <actions>
-        <!-- Toolbar launch button -->
-        <action id="Pi.Launch"
-                class="com.piterminal.bridge.actions.LaunchPiAction"
-                text="Launch Pi"
-                description="Open the conversation window and start a new Pi session"
-                icon="/icons/pi.svg">
-            <add-to-group group-id="MainToolbarRight" anchor="last"/>
-        </action>
 
         <!-- Quick launch/focus -->
         <action id="Pi.OpenToolWindow"
                 class="com.piterminal.bridge.actions.OpenPiAction"
-                text="Open Pi Agent"
-                description="Open the Pi conversation window"
+                text="Open Pi Bridge"
+                description="Open the Pi conversation window (focus existing or start one)"
                 icon="/icons/pi.svg">
             <keyboard-shortcut keymap="$default" first-keystroke="ctrl shift P"/>
         </action>

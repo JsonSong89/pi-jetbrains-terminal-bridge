@@ -15,7 +15,7 @@ import java.awt.event.MouseEvent
 class PiStatusWidgetFactory : StatusBarWidgetFactory {
 
     override fun getId(): String = "PiBridgeStatus"
-    override fun getDisplayName(): String = "Pi Bridge Status"
+    override fun getDisplayName(): String = "Pi Bridge"
     override fun isAvailable(project: Project): Boolean = true
 
     override fun createWidget(project: Project): StatusBarWidget {
