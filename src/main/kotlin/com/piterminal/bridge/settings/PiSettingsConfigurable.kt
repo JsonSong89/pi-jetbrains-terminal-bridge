@@ -211,7 +211,7 @@ class PiSettingsConfigurable : Configurable {
             ?.let { "server listening on 127.0.0.1:${it.port}" }
             ?: "server not started — starts with the first Pi terminal"
         val windows = if (SystemInfo.isWindows) {
-            "\nWindows: use PowerShell (or Git Bash) as the IDE Terminal shell; cmd.exe cannot run the live bridge."
+            "\nWindows: PowerShell 7 (pwsh.exe) is recommended as the IDE Terminal shell; cmd.exe cannot run the live bridge."
         } else ""
         return "$extension\n$server$windows"
     }

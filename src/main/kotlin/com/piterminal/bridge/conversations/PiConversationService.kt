@@ -19,7 +19,6 @@ import java.time.format.DateTimeFormatter
 import java.util.LinkedHashMap
 import java.util.UUID
 import java.util.concurrent.CopyOnWriteArrayList
-import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Project-level conversation map. One conversation <-> one Pi terminal.
@@ -185,8 +184,7 @@ class PiConversationService(private val project: Project) {
 
     fun appendToDraft(text: String, block: Boolean = false) {
         val conversation = ensureActiveConversation()
-        // Upsert same-path @file refs first; trailing newline is only a typing aid.
-        val next = upsertFileRefs(conversation.draft, text) ?: mergeDraft(conversation.draft, text, block)
+        val next = mergeDraft(conversation.draft, text, block)
         conversation.draft = if (next.endsWith("\n")) next else next + "\n"
         persist()
         showToolWindow(focus = true)
@@ -470,36 +468,6 @@ class PiConversationService(private val project: Project) {
         }
     }
 
-    /**
-     * Later @file / @file#L refs replace earlier ones for the same path.
-     * The workspace-open-files block is left intact.
-     * Returns null when [incoming] has no file references.
-     */
-    private fun upsertFileRefs(draft: String, incoming: String): String? {
-        val matches = FILE_REF_REGEX.findAll(incoming).toList()
-        if (matches.isEmpty()) return null
-
-        val latestByPath = LinkedHashMap<String, String>()
-        for (match in matches) {
-            latestByPath[match.groupValues[1]] = match.value
-        }
-
-        val workspace = WORKSPACE_BLOCK_REGEX.find(draft)?.value
-        var result = WORKSPACE_BLOCK_REGEX.replace(draft, "")
-        for (path in latestByPath.keys) {
-            result = result.replace(Regex("""@${Regex.escape(path)}(?:#L\d+(?:-\d+)?)?"""), "")
-        }
-        result = result
-            .replace(Regex("[ \\t]+\\n"), "\n")
-            .replace(Regex("\\n{3,}"), "\n\n")
-            .replace(Regex(" {2,}"), " ")
-            .trim()
-
-        val block = latestByPath.values.joinToString("\n")
-        val merged = if (result.isEmpty()) block else result + "\n" + block
-        return if (workspace.isNullOrBlank()) merged else "$merged\n\n$workspace"
-    }
-
     private fun replaceWorkspaceBlock(draft: String, newBlock: String): String {
         val without = WORKSPACE_BLOCK_REGEX.replace(draft, "").trim()
         return if (without.isEmpty()) newBlock else "$without\n\n$newBlock"
@@ -533,7 +501,6 @@ class PiConversationService(private val project: Project) {
         const val WORKSPACE_START = "<workspace-open-files>"
         const val WORKSPACE_END = "</workspace-open-files>"
         private val TITLE_TIME_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("MM-dd HH:mm")
-        private val FILE_REF_REGEX = Regex("""@([^\s#]+)(?:#L\d+(?:-\d+)?)?""")
         private val WORKSPACE_BLOCK_REGEX = Regex(
             """$WORKSPACE_START[\s\S]*?$WORKSPACE_END"""
         )

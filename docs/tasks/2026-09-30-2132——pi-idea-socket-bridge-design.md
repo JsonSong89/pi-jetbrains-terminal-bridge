@@ -92,9 +92,9 @@
 
 触发时机：IDEA 启动、socket 重连成功、以及手动 reconcile。
 
-逻辑：扫 `~/.pi/agent/sessions/--<projectPath>--/`（启动时显式注入 `--session-dir ~/.pi/agent/sessions`，让插件与 pi 的目录约定确定，不受用户 `sessionDir`/env 配置漂移影响）：
+逻辑：先按 pi 默认目录约定扫 `~/.pi/agent/sessions/--<projectPath>--/`，再兜底在 `sessions/` 下跨子目录按 `*_<id>.jsonl` 递归搜一层。pi 的 `--session-dir` **按给定目录扁平查找**（不再套一层 cwd 编码），且 `--session <完整路径>` 走 path 分支、不需要 `--session-dir`。因此插件**不再注入 `--session-dir`**（让 pi 用自身配置决定落盘目录），恢复时优先用 `--session <jsonl 完整路径>`；扫不到则退回同 id 的 `--session-id`——pi 对该 id 是 resume-if-exists / create-if-not，即便扫描没覆盖到用户自定义 `sessionDir` 也能正确恢复而非重复建会话。若给 `--session` 传裸 id 又配错 `--session-dir`，才会报 `No session found matching`。
 
-- v1（已实现，launch 时判定）：**不在启动时对账**——resume vs 新建在 launch 时用 `sessionFileExists` 判定（此刻 jsonl 必已落盘，避免刚建会话就重启时误杀 id）；pi 侧文件被删则用同 id `--session-id` 重建
+- v1（已实现，launch 时判定）：**不在启动时对账**——resume vs 新建在 launch 时用 `findSessionFile` 判定（此刻 jsonl 必已落盘，避免刚建会话就重启时误杀 id）；命中给 `--session <完整路径>`，未命中给同 id 的 `--session-id`（pi 侧文件被删也会用该 id 重建）
 - v2（不做，理由见 §七）：mtime 重绑失联窗口的会话切换还原
 
 ## 六、socket 解锁的功能（迭代顺序）

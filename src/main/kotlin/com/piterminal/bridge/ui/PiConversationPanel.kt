@@ -46,10 +46,12 @@ import java.awt.Dimension
 import java.awt.FlowLayout
 import java.text.SimpleDateFormat
 import java.util.Date
+import java.awt.Cursor
 import java.awt.event.InputEvent
 import java.awt.event.KeyEvent
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
+import java.awt.event.MouseMotionAdapter
 import javax.swing.Box
 import javax.swing.BoxLayout
 import javax.swing.DefaultComboBoxModel
@@ -87,11 +89,14 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
     }
     private val timeFormat = SimpleDateFormat("HH:mm")
     private companion object {
-        const val COMBO_DELETE_HIT_PX = 22
+        const val COMBO_DELETE_HIT_PX = 28
     }
     private var syncing = false
     private var comboDeleteClickInstalled = false
     private var suppressComboAction = false
+    private var comboDeleteHoverIndex = -1
+    private var reopenComboPopup = false
+    private var deletingFromCombo = false
     @Volatile
     private var disposed = false
 
@@ -128,15 +133,17 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
 
     private fun buildUi(): JPanel {
         combo.renderer = ConversationComboRenderer()
-        combo.addPopupMenuListener(object : PopupMenuListener {
+            combo.addPopupMenuListener(object : PopupMenuListener {
             override fun popupMenuWillBecomeVisible(e: PopupMenuEvent) {
                 installComboDeleteClickHandler()
-                if (!comboDeleteClickInstalled) {
-                    SwingUtilities.invokeLater { installComboDeleteClickHandler() }
-                }
+                SwingUtilities.invokeLater { installComboDeleteClickHandler() }
             }
-            override fun popupMenuWillBecomeInvisible(e: PopupMenuEvent) {}
-            override fun popupMenuCanceled(e: PopupMenuEvent) {}
+            override fun popupMenuWillBecomeInvisible(e: PopupMenuEvent) {
+                comboDeleteHoverIndex = -1
+            }
+            override fun popupMenuCanceled(e: PopupMenuEvent) {
+                comboDeleteHoverIndex = -1
+            }
         })
         combo.addActionListener {
             if (syncing || suppressComboAction) return@addActionListener
@@ -283,14 +290,29 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
     }
 
     private fun refreshUi() {
+        var reopen = false
         syncing = true
         try {
             val items = conversations.all()
             val active = conversations.active()
-            val model = DefaultComboBoxModel<PiConversation>()
-            items.forEach { model.addElement(it) }
-            combo.model = model
-            combo.selectedItem = active
+            val keepPopup = reopenComboPopup && combo.isPopupVisible
+            reopen = reopenComboPopup && items.isNotEmpty()
+            reopenComboPopup = false
+            val existing = combo.model as? DefaultComboBoxModel<PiConversation>
+            if (keepPopup && existing != null) {
+                val nextIds = items.map { it.id }.toSet()
+                var i = 0
+                while (i < existing.size) {
+                    if (existing.getElementAt(i).id !in nextIds) existing.removeElementAt(i)
+                    else i++
+                }
+                existing.selectedItem = active
+            } else {
+                val model = DefaultComboBoxModel<PiConversation>()
+                items.forEach { model.addElement(it) }
+                combo.model = model
+                combo.selectedItem = active
+            }
             combo.isEnabled = items.isNotEmpty()
 
             rebuildHistory(active)
@@ -316,6 +338,11 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
             applyConversationFont()
         } finally {
             syncing = false
+        }
+        if (reopen) {
+            SwingUtilities.invokeLater {
+                if (!disposed && combo.itemCount > 0) combo.showPopup()
+            }
         }
     }
 
@@ -623,32 +650,74 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
     }
 
     private fun installComboDeleteClickHandler() {
-        if (comboDeleteClickInstalled) return
         val popup = combo.ui.getAccessibleChild(combo, 0) as? ComboPopup ?: return
         val list = popup.list
+        if (list.getClientProperty("pi-combo-delete") == true) {
+            comboDeleteClickInstalled = true
+            return
+        }
+        list.putClientProperty("pi-combo-delete", true)
         list.addMouseListener(object : MouseAdapter() {
             override fun mousePressed(e: MouseEvent) {
-                if (handleComboDeleteClick(list, e)) e.consume()
+                if (handleComboDeleteClick(list, e)) {
+                    e.consume()
+                    deletingFromCombo = true
+                }
             }
 
             override fun mouseReleased(e: MouseEvent) {
-                if (suppressComboAction) e.consume()
+                if (deletingFromCombo || suppressComboAction) e.consume()
+            }
+
+            override fun mouseClicked(e: MouseEvent) {
+                if (deletingFromCombo || suppressComboAction) {
+                    e.consume()
+                    deletingFromCombo = false
+                }
+            }
+
+            override fun mouseExited(e: MouseEvent) {
+                if (comboDeleteHoverIndex != -1) {
+                    comboDeleteHoverIndex = -1
+                    list.cursor = Cursor.getDefaultCursor()
+                    list.repaint()
+                }
+            }
+        })
+        list.addMouseMotionListener(object : MouseMotionAdapter() {
+            override fun mouseMoved(e: MouseEvent) {
+                val hover = deleteHitIndex(list, e)
+                list.cursor = if (hover >= 0) Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+                else Cursor.getDefaultCursor()
+                if (hover != comboDeleteHoverIndex) {
+                    comboDeleteHoverIndex = hover
+                    list.repaint()
+                }
             }
         })
         comboDeleteClickInstalled = true
     }
 
-    private fun handleComboDeleteClick(list: JList<*>, e: MouseEvent): Boolean {
+    private fun deleteHitIndex(list: JList<*>, e: MouseEvent): Int {
         val index = list.locationToIndex(e.point)
+        if (index < 0) return -1
+        val conversation = list.model.getElementAt(index) as? PiConversation ?: return -1
+        if (conversations.isTerminalAlive(conversation.id)) return -1
+        val cell = list.getCellBounds(index, index) ?: return -1
+        if (!cell.contains(e.point)) return -1
+        if (e.x < cell.x + cell.width - JBUI.scale(COMBO_DELETE_HIT_PX)) return -1
+        return index
+    }
+
+    private fun handleComboDeleteClick(list: JList<*>, e: MouseEvent): Boolean {
+        val index = deleteHitIndex(list, e)
         if (index < 0) return false
         val conversation = list.model.getElementAt(index) as? PiConversation ?: return false
-        if (conversations.isTerminalAlive(conversation.id)) return false
-        val cell = list.getCellBounds(index, index) ?: return false
-        if (e.x < cell.x + cell.width - JBUI.scale(COMBO_DELETE_HIT_PX)) return false
         // Block the combo's select-to-activate path so a closed session is
-        // not relaunched just to be deleted.
+        // not relaunched just to be deleted. Keep the popup open for batch delete.
         suppressComboAction = true
-        combo.hidePopup()
+        reopenComboPopup = true
+        comboDeleteHoverIndex = -1
         conversations.deleteConversation(conversation.id)
         SwingUtilities.invokeLater { suppressComboAction = false }
         return true
@@ -664,9 +733,12 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
     private inner class ConversationComboRenderer : JPanel(BorderLayout()), javax.swing.ListCellRenderer<PiConversation> {
         private val title = JLabel()
         private val deleteHint = JLabel("×").apply {
-            font = JBUI.Fonts.smallFont()
-            foreground = JBUI.CurrentTheme.ContextHelp.FOREGROUND
-            border = JBUI.Borders.emptyLeft(6)
+            horizontalAlignment = JLabel.CENTER
+            verticalAlignment = JLabel.CENTER
+            font = JBUI.Fonts.smallFont().deriveFont(java.awt.Font.BOLD)
+            isOpaque = true
+            preferredSize = Dimension(JBUI.scale(22), JBUI.scale(18))
+            toolTipText = "Delete conversation"
         }
 
         init {
@@ -693,14 +765,36 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
                 else -> ""
             }
             title.text = (conversation?.title ?: "No conversations") + suffix
-            deleteHint.isVisible = index >= 0 && conversation != null && !alive
+            val showDelete = index >= 0 && conversation != null && !alive
+            val overDelete = showDelete && index == comboDeleteHoverIndex
+            deleteHint.isVisible = showDelete
+            if (showDelete) {
+                val borderColor = if (overDelete) {
+                    JBColor.namedColor("Component.focusedBorderColor", JBColor.border())
+                } else {
+                    JBColor.namedColor("Component.borderColor", JBColor.border())
+                }
+                deleteHint.border = JBUI.Borders.compound(
+                    JBUI.Borders.customLine(borderColor, 1),
+                    JBUI.Borders.empty(1, 6)
+                )
+                deleteHint.background = if (overDelete) {
+                    JBUI.CurrentTheme.ActionButton.hoverBackground()
+                } else {
+                    JBUI.CurrentTheme.ActionButton.pressedBackground()
+                }
+                deleteHint.foreground = if (overDelete) {
+                    JBColor.namedColor("Label.errorForeground", JBColor.RED)
+                } else {
+                    JBUI.CurrentTheme.ContextHelp.FOREGROUND
+                }
+            }
             val selectedBg = list.selectionBackground
             val selectedFg = list.selectionForeground
             val normalBg = list.background
             val normalFg = if (conversation != null && !alive && !working) JBColor.GRAY else list.foreground
             background = if (isSelected) selectedBg else normalBg
             title.foreground = if (isSelected) selectedFg else normalFg
-            deleteHint.foreground = if (isSelected) selectedFg else JBUI.CurrentTheme.ContextHelp.FOREGROUND
             return this
         }
     }

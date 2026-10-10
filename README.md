@@ -6,6 +6,8 @@
 
 > **Prerequisite:** install the Pi CLI separately.
 > `npm i -g @earendil-works/pi-coding-agent` or visit [pi.dev](https://pi.dev)
+>
+> **Windows:** use **PowerShell 7** (`pwsh.exe`) as the IDE Terminal shell (Settings → Tools → Terminal). cmd.exe cannot run the live bridge.
 
 ## Features
 
@@ -27,7 +29,7 @@
 ```
 IDEA (PiBridgeServer, loopback TCP + token)
    ▲                                   │
-   │ env PI_LAUNCHER_PORT/TOKEN/TAB_KEY│  pi --session-id <uuid> --name <tab> --session-dir ~/.pi/agent/sessions
+   │ env PI_LAUNCHER_PORT/TOKEN/TAB_KEY│  pi --session <path> | --session-id <uuid> --name <tab>
    │                                   ▼
 Terminal tab  ──  ~/.pi/agent/extensions/pi-launcher-bridge.ts (lazy-installed, hash-versioned)
 ```
@@ -100,7 +102,7 @@ Architecture and decision records live in [`docs/tasks/`](docs/tasks/). Notably:
 
 - Conversation model: stable `id` (tab key / primary key) + rebindable `piSessionId` — `/new` swaps the pi session, the tab identity stays.
 - Pi's jsonl files are the source of truth; the plugin only stores an index.
-- Known limitation: on Windows the live bridge injects PowerShell (`$env:…`) or POSIX `env` (Git Bash). cmd.exe is detected and skipped, with a warning. `--session` / `--resume` in Extra arguments are dropped at launch — the panel owns the session.
+- Known limitation: on Windows the live bridge injects PowerShell (`$env:…`) or POSIX `env` (Git Bash). **PowerShell 7 (`pwsh.exe`) is recommended** as the IDE Terminal shell (Settings → Tools → Terminal). cmd.exe is detected and skipped, with a warning. `--session` / `--resume` in Extra arguments are dropped at launch — the panel owns the session.
 
 ## Acknowledgements
 

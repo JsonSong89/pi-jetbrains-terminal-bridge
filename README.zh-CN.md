@@ -6,6 +6,8 @@
 
 > **前置条件：** 需单独安装 Pi CLI。
 > `npm i -g @earendil-works/pi-coding-agent` 或访问 [pi.dev](https://pi.dev)
+>
+> **Windows：** 建议将 IDE 终端 Shell 设为 **PowerShell 7**（`pwsh.exe`）（Settings → Tools → Terminal）。cmd.exe 无法用于实时桥接。
 
 ## 功能
 
@@ -27,7 +29,7 @@
 ```
 IDEA（PiBridgeServer，loopback TCP + token）
    ▲                                   │
-   │ env PI_LAUNCHER_PORT/TOKEN/TAB_KEY│  pi --session-id <uuid> --name <tab> --session-dir ~/.pi/agent/sessions
+   │ env PI_LAUNCHER_PORT/TOKEN/TAB_KEY│  pi --session <path> | --session-id <uuid> --name <tab>
    │                                   ▼
 Terminal 标签页 ── ~/.pi/agent/extensions/pi-launcher-bridge.ts（懒安装，内容 hash 版本化）
 ```
@@ -95,7 +97,7 @@ JDK 21 toolchain，IntelliJ Platform Gradle Plugin 2.x，目标 2026.1，`sinceB
 
 - 会话模型：稳定 `id`（tabKey / 主键）+ 可换绑的 `piSessionId` —— `/new` 换 pi 会话，tab 身份不变。
 - pi 的 jsonl 文件是数据权威，插件只存索引。
-- 已知限制：Windows 上实时桥接按 PowerShell（`$env:…`）或 Git Bash（`env`）注入。若终端是 cmd.exe，会跳过注入并给出警告。Extra arguments 里的 `--session` / `--resume` 会在启动时丢掉——会话由面板接管。
+- 已知限制：Windows 上实时桥接按 PowerShell（`$env:…`）或 Git Bash（`env`）注入。**推荐使用 PowerShell 7（`pwsh.exe`）** 作为 IDE 终端 Shell（Settings → Tools → Terminal）。若终端是 cmd.exe，会跳过注入并给出警告。Extra arguments 里的 `--session` / `--resume` 会在启动时丢掉——会话由面板接管。
 
 ## 致谢
 

@@ -16,15 +16,7 @@ object PiModelLoader {
         val id: String,
         val name: String,
         val provider: String
-    ) {
-        /** Value used for pi --model flag */
-        fun toCommandArg(): String = "$provider/$id"
-
-        /** Display in combo box */
-        fun toDisplayString(): String {
-            return if (name.isNotBlank()) "$name ($provider/$id)" else "$provider/$id"
-        }
-    }
+    )
 
     fun loadModels(): List<ModelInfo> {
         val models = mutableListOf<ModelInfo>()

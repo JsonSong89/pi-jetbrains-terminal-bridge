@@ -112,10 +112,6 @@ class PiTerminalService(private val project: Project) : Disposable {
         return isTerminalAlive(session)
     }
 
-    fun runningCount(): Int = sessions.values.count { isTerminalAlive(it) }
-
-    fun isReady(): Boolean = runningCount() > 0
-
     /**
      * Send one user message to the Pi TUI.
      * executeCommand treats every '\n' as Enter, so a multi-line draft becomes
@@ -261,7 +257,11 @@ class PiTerminalService(private val project: Project) : Disposable {
         val endpoint = PiBridgeServer.getInstance(project).ensureStarted()
 
         val settings = PiSettings.getInstance().state
-        val resume = sessionFileExists(piSessionId, workingDir)
+        // Best-effort: prefer an explicit jsonl path so resume is unambiguous.
+        // When it misses we fall back to --session-id, which pi itself resolves
+        // (resume-if-exists / create-if-not) against its own session-dir config,
+        // so the plugin never has to predict pi's storage layout.
+        val existingFile = findSessionFile(piSessionId, workingDir)
         val extra = sanitizeExtraArgs(settings.extraArgs)
         if (extra.dropped.isNotEmpty()) {
             val flags = extra.dropped.distinct().joinToString(", ")
@@ -274,7 +274,7 @@ class PiTerminalService(private val project: Project) : Disposable {
         val shell = classifyTerminalShell()
         if (shell == ShellKind.CMD) {
             showNotification(
-                "The IDE Terminal shell looks like cmd.exe. Pi Bridge can only inject the live channel in PowerShell (or Git Bash). Pi will still start, but the panel will not stay in sync. Settings → Tools → Terminal → Shell path → powershell.exe",
+                "The IDE Terminal shell looks like cmd.exe. Pi Bridge can only inject the live channel in PowerShell (or Git Bash). Pi will still start, but the panel will not stay in sync. Settings → Tools → Terminal → Shell path → pwsh.exe (PowerShell 7 recommended).",
                 NotificationType.WARNING
             )
         }
@@ -296,13 +296,17 @@ class PiTerminalService(private val project: Project) : Disposable {
 
             append(settings.piCommand)
 
-            if (resume) {
-                append(" --session ${quote(piSessionId)}")
+            if (existingFile != null) {
+                // Explicit path: pi's path branch opens it directly (a path
+                // containing a separator / ending in .jsonl needs no --session-dir).
+                append(" --session ${quote(existingFile.toString())}")
             } else {
+                // No --session-dir on purpose: pi uses its own config to resolve or
+                // create the session. If the file exists but our scan missed it,
+                // pi still resumes instead of duplicating.
                 append(" --session-id ${quote(piSessionId)}")
             }
             append(" --name ${quote(title)}")
-            append(" --session-dir ${quote(sessionDir().toString())}")
 
             val model = if (settings.customModelId.isNotBlank()) {
                 settings.customModelId
@@ -394,7 +398,7 @@ class PiTerminalService(private val project: Project) : Disposable {
             .getNotificationGroup(PiBridgeUi.NOTIFICATION_GROUP_ID)
             .createNotification(
                 "$tabName process exited unexpectedly",
-                "Click to restart Pi. On Windows, if the Terminal shell is cmd.exe, switch it to powershell.exe (Settings → Tools → Terminal) — otherwise the launch command fails.",
+                "Click to restart Pi. On Windows, use PowerShell 7 (pwsh.exe) as the Terminal shell (Settings → Tools → Terminal).",
                 NotificationType.WARNING
             )
         notification.addAction(object : NotificationAction("Restart Pi") {
@@ -488,23 +492,60 @@ class PiTerminalService(private val project: Project) : Disposable {
     companion object {
         fun getInstance(project: Project): PiTerminalService = project.service()
 
-        /** Pi session storage the plugin pins via --session-dir. */
-        fun sessionDir(): Path =
-            Paths.get(System.getProperty("user.home"), ".pi", "agent", "sessions")
+        /** Root of pi session storage: (PI_CODING_AGENT_DIR ?? ~/.pi/agent)/sessions. */
+        fun sessionDir(): Path = agentDir().resolve("sessions")
 
-        /** Mirrors pi's cwd → directory mapping: strip leading separator, /, \, : become '-'. */
-        private fun sessionDirFor(cwd: String): Path {
-            val cleaned = cwd.trimStart('/', '\\').replace('/', '-').replace('\\', '-').replace(':', '-')
+        /** Mirrors pi's getAgentDir(): PI_CODING_AGENT_DIR env, else ~/.pi/agent. */
+        private fun agentDir(): Path {
+            val env = System.getenv("PI_CODING_AGENT_DIR")?.takeIf { it.isNotBlank() } ?: return Paths.get(
+                System.getProperty("user.home"), ".pi", "agent"
+            )
+            val expanded = if (env == "~" || env.startsWith("~/") || env.startsWith("~\\")) {
+                Paths.get(System.getProperty("user.home")).resolve(env.substring(2)).toString()
+            } else env
+            return Paths.get(expanded)
+        }
+
+        /**
+         * Default per-project dir pi uses when no session dir is configured:
+         * `<sessions>/--<cwd with one leading separator stripped, then / \\ : -> ->--`.
+         * Kept byte-for-byte compatible with pi's `getDefaultSessionDirPath`.
+         */
+        private fun defaultSessionDirFor(cwd: String): Path {
+            val cleaned = cwd.replace(Regex("^[/\\\\]"), "").replace(Regex("[/\\\\:]"), "-")
             return sessionDir().resolve("--$cleaned--")
         }
 
-        fun sessionFileExists(piSessionId: String, cwd: String): Boolean = try {
-            val dir = sessionDirFor(cwd)
-            Files.isDirectory(dir) && Files.list(dir).use { stream ->
-                stream.anyMatch { it.fileName.toString().endsWith("_${piSessionId}.jsonl") }
+        /**
+         * Locates the jsonl for [piSessionId]. Fast path: pi's default per-cwd dir.
+         * Fallback: any subdir under the sessions root (covers custom/relocated
+         * layouts). Best-effort; callers fall back to `--session-id` when null.
+         */
+        fun findSessionFile(piSessionId: String, cwd: String): Path? {
+            findBySuffix(defaultSessionDirFor(cwd), piSessionId)?.let { return it }
+            val root = sessionDir()
+            if (!Files.isDirectory(root)) return null
+            return try {
+                Files.walk(root, 3).use { stream ->
+                    stream.filter { Files.isRegularFile(it) }
+                        .filter { it.fileName.toString().endsWith("_${piSessionId}.jsonl") }
+                        .findFirst()
+                        .orElse(null)
+                }
+            } catch (_: Exception) {
+                null
+            }
+        }
+
+        private fun findBySuffix(dir: Path, piSessionId: String): Path? = try {
+            if (!Files.isDirectory(dir)) null
+            else Files.list(dir).use { stream ->
+                stream.filter { it.fileName.toString().endsWith("_${piSessionId}.jsonl") }
+                    .findFirst()
+                    .orElse(null)
             }
         } catch (_: Exception) {
-            false
+            null
         }
 
         private data class SanitizedExtraArgs(val kept: String, val dropped: List<String>)

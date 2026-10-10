@@ -11,7 +11,9 @@
 
     <blockquote>
         <b>Important:</b> Install the Pi CLI separately before using this plugin.<br/>
-        <code>npm i -g @earendil-works/pi-coding-agent</code> or visit <a href="https://pi.dev">pi.dev</a>
+        <code>npm i -g @earendil-works/pi-coding-agent</code> or visit <a href="https://pi.dev">pi.dev</a><br/>
+        <b>Windows:</b> use <b>PowerShell 7</b> (<code>pwsh.exe</code>) as the IDE Terminal shell
+        (Settings → Tools → Terminal → Shell path). cmd.exe is not supported for the live bridge.
     </blockquote>
 
     <h3>Features</h3>
@@ -52,7 +54,9 @@
 
     <blockquote>
         <b>前置条件：</b>使用本插件前请单独安装 Pi CLI。<br/>
-        <code>npm i -g @earendil-works/pi-coding-agent</code> 或访问 <a href="https://pi.dev">pi.dev</a>
+        <code>npm i -g @earendil-works/pi-coding-agent</code> 或访问 <a href="https://pi.dev">pi.dev</a><br/>
+        <b>Windows：</b>建议将 IDE 终端 Shell 设为 <b>PowerShell 7</b>（<code>pwsh.exe</code>）
+        （Settings → Tools → Terminal → Shell path）。cmd.exe 无法用于实时桥接。
     </blockquote>
 
     <h3>功能</h3>
@@ -86,6 +90,14 @@
         ]]></description>
 
     <change-notes><![CDATA[
+    <h3>0.3.3</h3>
+    <ul>
+        <li><b>Fix: resume now finds the right session file.</b> The plugin previously passed the parent <code>sessions</code> directory, so <code>--session &lt;id&gt;</code> failed with <code>No session found matching</code>. It now locates pi's real per-project folder and passes the full <code>.jsonl</code> path on resume.</li>
+        <li>Stop forcing <code>--session-dir</code>: new sessions follow pi's own configuration (<code>PI_CODING_AGENT_DIR</code>, <code>sessionDir</code>, or the default per-project path), so custom layouts keep working; if the scan misses, <code>--session-id</code> lets pi resolve or create.</li>
+        <li>Windows: <b>PowerShell 7</b> (<code>pwsh.exe</code>) is recommended as the IDE Terminal shell; cmd.exe is explicitly unsupported for the live bridge.</li>
+        <li>Conversation dropdown: the delete button keeps the popup open and highlights on hover, so closed sessions can be deleted in a batch.</li>
+        <li>Send to Pi appends file references again (no more same-path replacement).</li>
+    </ul>
     <h3>0.3.2</h3>
     <ul>
         <li>Finish notifications fire only when the IDE is in the background; click the balloon to focus that terminal</li>
