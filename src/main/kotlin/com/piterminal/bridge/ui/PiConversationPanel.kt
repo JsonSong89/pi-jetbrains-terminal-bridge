@@ -735,10 +735,9 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
         private val deleteHint = JLabel("×").apply {
             horizontalAlignment = JLabel.CENTER
             verticalAlignment = JLabel.CENTER
-            font = JBUI.Fonts.smallFont().deriveFont(java.awt.Font.BOLD)
-            isOpaque = true
+            font = JBUI.Fonts.smallFont()
+            isOpaque = false
             preferredSize = Dimension(JBUI.scale(22), JBUI.scale(18))
-            toolTipText = "Delete conversation"
         }
 
         init {
@@ -769,25 +768,14 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
             val overDelete = showDelete && index == comboDeleteHoverIndex
             deleteHint.isVisible = showDelete
             if (showDelete) {
-                val borderColor = if (overDelete) {
-                    JBColor.namedColor("Component.focusedBorderColor", JBColor.border())
-                } else {
-                    JBColor.namedColor("Component.borderColor", JBColor.border())
-                }
-                deleteHint.border = JBUI.Borders.compound(
-                    JBUI.Borders.customLine(borderColor, 1),
-                    JBUI.Borders.empty(1, 6)
-                )
+                deleteHint.isOpaque = overDelete
+                deleteHint.border = JBUI.Borders.empty(1, 6)
                 deleteHint.background = if (overDelete) {
                     JBUI.CurrentTheme.ActionButton.hoverBackground()
                 } else {
-                    JBUI.CurrentTheme.ActionButton.pressedBackground()
+                    null
                 }
-                deleteHint.foreground = if (overDelete) {
-                    JBColor.namedColor("Label.errorForeground", JBColor.RED)
-                } else {
-                    JBUI.CurrentTheme.ContextHelp.FOREGROUND
-                }
+                deleteHint.foreground = JBUI.CurrentTheme.ContextHelp.FOREGROUND
             }
             val selectedBg = list.selectionBackground
             val selectedFg = list.selectionForeground
