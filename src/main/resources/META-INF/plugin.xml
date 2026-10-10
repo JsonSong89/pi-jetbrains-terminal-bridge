@@ -6,7 +6,22 @@
     <description><![CDATA[
     <h2>Pi Terminal Bridge</h2>
     <p>
-        Persistent <a href="https://pi.dev">Pi coding agent</a> sessions for JetBrains IDEs — launch, track and resume conversations, with a live bridge between the IDE and the pi terminal. The Pi tab is a real terminal running the full pi TUI. Send code context from the editor, pick a model, optionally open files Pi edited.
+        This plugin does not try to be an AI IDE. It does <b>one thing</b>:
+        in the JetBrains IDE you already live in, compose prompts with enough context —
+        then send them to <a href="https://pi.dev">Pi</a> and watch the result in a real terminal.
+    </p>
+    <p>
+        Many developers still care about architecture and clean code.
+        They want prompts that name the class, the method, the call site —
+        so the agent edits the right place and stays in bounds.
+        JetBrains' index, Go to Declaration, Find Usages, and Go to Implementation
+        are exactly the tools they already use to gather that context.
+        This plugin is the last mile: keep those clues in a prompt, send them to Pi, see the TUI respond.
+    </p>
+    <p>
+        It is <b>not</b> a vibe-coding cockpit.
+        It is for people who want more control over, and participation in, how the agent changes their code.
+        Session lists, live badges, drag-and-drop and notifications are icing.
     </p>
 
     <blockquote>
@@ -16,7 +31,7 @@
         (Settings → Tools → Terminal → Shell path). cmd.exe is not supported for the live bridge.
     </blockquote>
 
-    <h3>Features</h3>
+    <h3>What you get</h3>
     <ul>
         <li><b>Persistent conversations</b> — sessions survive IDE restarts; click to relaunch and resume. Terminals are not auto-revived on startup.</li>
         <li><b>Live bridge</b> — working/idle badges, current model, and session switches (<code>/new</code>, <code>/fork</code>, <code>/resume</code>) reflected in the IDE panel in real time; old sessions archived and resumable</li>
@@ -49,7 +64,20 @@
 
     <h2>Pi Terminal Bridge（pi 终端桥）</h2>
     <p>
-        为 JetBrains IDE 提供 <a href="https://pi.dev">Pi coding agent</a> 的持久会话 —— 启动、跟踪与恢复会话，并在 IDE 与 pi 终端之间维持一条实时通道。Pi 标签页是真实终端里跑着完整的 pi TUI。可从编辑器发送代码上下文、选择模型，也可选在 Pi 改文件后自动打开。
+        这不是一个「AI IDE」。它真正做的事只有一件：
+        在你已经熟悉的 JetBrains IDE 里，把带充分上下文线索的提示词编排好，
+        发给 <a href="https://pi.dev">Pi</a>，立刻在真实终端里看到结果。
+    </p>
+    <p>
+        不少人仍然在意架构层次和代码整洁，希望提示词能精确到类 / 方法，
+        让 AI 改得更准、把修改约束在该改的范围里。
+        JetBrains 的代码索引、方法跳转、引用查找、查看实现，
+        正是资深程序员早就习惯用来组织这种上下文的方式。
+        这个插件补上最后一公里：把这些线索收进 prompt，发给 Pi，看它干活。
+    </p>
+    <p>
+        它不适合完全 vibe 开发；更适合希望对 AI coding 过程有更多掌控力和参与感的场景。
+        会话列表、状态徽标、拖放和通知都只是锦上添花。
     </p>
 
     <blockquote>
@@ -59,7 +87,7 @@
         （Settings → Tools → Terminal → Shell path）。cmd.exe 无法用于实时桥接。
     </blockquote>
 
-    <h3>功能</h3>
+    <h3>还能做什么</h3>
     <ul>
         <li><b>持久会话</b> —— 会话跨 IDE 重启保留；点击即可重新拉起并恢复。启动时不会批量复活终端。</li>
         <li><b>实时桥接</b> —— working/idle 徽标、当前模型，以及终端内 <code>/new</code>、<code>/fork</code>、<code>/resume</code> 换绑都会同步到 IDE 面板；旧会话归档后仍可恢复</li>
@@ -97,6 +125,7 @@
         <li>Windows: <b>PowerShell 7</b> (<code>pwsh.exe</code>) is recommended as the IDE Terminal shell; cmd.exe is explicitly unsupported for the live bridge.</li>
         <li>Conversation dropdown: the delete button keeps the popup open and highlights on hover, so closed sessions can be deleted in a batch.</li>
         <li>Send to Pi appends file references again (no more same-path replacement).</li>
+        <li>README / Marketplace description now lead with why the plugin exists: compose grounded prompts in the IDE and send them to Pi — not a vibe-coding cockpit.</li>
     </ul>
     <h3>0.3.2</h3>
     <ul>

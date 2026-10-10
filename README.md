@@ -2,14 +2,22 @@
 
 [English](README.md) · [简体中文](README.zh-CN.md)
 
-[JetBrains plugin] Persistent [Pi coding agent](https://pi.dev) sessions for JetBrains IDEs — launch, track and resume conversations, with a live bridge between the IDE and the pi CLI terminal.
+This plugin does not try to be an AI IDE. It does **one thing**:
+
+**In the JetBrains IDE you already live in, compose prompts with enough context — then send them to [Pi](https://pi.dev) and watch the result.**
+
+The rest (session list, live badges, drag-and-drop, notifications) is icing.
+
+Many developers still care about architecture and clean code. They want prompts that name the class, the method, the call site — so the agent edits the right place and stays in bounds. JetBrains' index, Go to Declaration, Find Usages, and Go to Implementation are exactly the tools they already use to gather that context. This plugin is the last mile: keep those clues in a prompt, send them to Pi, see the TUI respond.
+
+It is **not** a vibe-coding cockpit. It is for people who want more control over, and participation in, how the agent changes their code.
 
 > **Prerequisite:** install the Pi CLI separately.
 > `npm i -g @earendil-works/pi-coding-agent` or visit [pi.dev](https://pi.dev)
 >
 > **Windows:** use **PowerShell 7** (`pwsh.exe`) as the IDE Terminal shell (Settings → Tools → Terminal). cmd.exe cannot run the live bridge.
 
-## Features
+## What you get
 
 - **Persistent conversations** — Pi sessions survive IDE restarts; conversations are listed in the Pi panel and relaunch with `pi --session <id>` on click. Terminals are not auto-revived on startup; you decide when to resume.
 - **Live IDEA ↔ pi bridge** — a loopback TCP channel with a per-instance token keeps the panel in sync with the terminal in real time:

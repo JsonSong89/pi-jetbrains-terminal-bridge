@@ -2,14 +2,22 @@
 
 [English](README.md) · [简体中文](README.zh-CN.md)
 
-[JetBrains 插件] 为 JetBrains IDE 提供 [Pi coding agent](https://pi.dev) 的持久会话 —— 启动、跟踪与恢复会话，并在 IDE 与 pi CLI 终端之间维持一条实时通道。
+这不是一个「AI IDE」。它真正做的事只有一件：
+
+**在你已经熟悉的 JetBrains IDE 里，把带充分上下文线索的提示词编排好，发给 [Pi](https://pi.dev)，立刻看到结果。**
+
+其余（会话列表、状态徽标、拖放、通知）都只是锦上添花。
+
+不少人仍然在意架构层次和代码整洁，希望提示词能精确到类 / 方法，让 AI 改得更准、把修改约束在该改的范围里。JetBrains 的代码索引、方法跳转、引用查找、查看实现，正是资深程序员早就习惯用来组织这种上下文的方式。这个插件补上最后一公里：把这些线索收进 prompt，发给 Pi，在真实终端里看它干活。
+
+它不适合完全 vibe 开发；更适合希望对 AI coding 过程有更多掌控力和参与感的场景。
 
 > **前置条件：** 需单独安装 Pi CLI。
 > `npm i -g @earendil-works/pi-coding-agent` 或访问 [pi.dev](https://pi.dev)
 >
 > **Windows：** 建议将 IDE 终端 Shell 设为 **PowerShell 7**（`pwsh.exe`）（Settings → Tools → Terminal）。cmd.exe 无法用于实时桥接。
 
-## 功能
+## 还能做什么
 
 - **持久会话** —— Pi 会话跨 IDE 重启保留；面板中列出全部会话，点击即用 `pi --session <id>` 重启恢复。重启后终端不自动复活，由你决定何时恢复。
 - **IDEA ↔ pi 实时桥接** —— 一条 loopback TCP 通道（每实例独立 token）让面板与终端实时同步：
