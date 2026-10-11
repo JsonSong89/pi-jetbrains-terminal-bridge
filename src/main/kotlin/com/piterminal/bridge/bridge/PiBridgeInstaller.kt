@@ -18,7 +18,7 @@ object PiBridgeInstaller {
 
     private val logger = Logger.getInstance(PiBridgeInstaller::class.java)
 
-    private const val VERSION = 2
+    private const val VERSION = 3
 
     // language=TypeScript
     private val SOURCE = """
@@ -116,12 +116,19 @@ export default function (pi) {
   // tool_call report would race the write and refresh nothing.
   pi.on("tool_result", (event, _ctx) => {
     try {
-      const tool = event?.data?.tool ?? event?.tool;
-      if (tool && /edit|write|patch|apply/i.test(String(tool))) {
-        const args = event?.data?.args ?? event?.args;
-        const path = args?.filePath ?? args?.file_path ?? args?.path;
-        if (path) send("file_modified", { path: String(path) });
+      const data = event?.data ?? event ?? {};
+      const tool = String(data.tool ?? event?.tool ?? "");
+      if (!/edit|write|patch|apply|create|save|replace/i.test(tool)) return;
+      const args = data.args ?? {};
+      const details = data.details ?? data.result ?? {};
+      const paths = [];
+      const push = (p) => { if (typeof p === "string" && p.length > 0) paths.push(p); };
+      push(args.filePath); push(args.file_path); push(args.path); push(args.file);
+      push(details.path); push(details.filePath); push(details.file_path);
+      if (Array.isArray(args.files)) {
+        for (const f of args.files) push(typeof f === "string" ? f : f?.path);
       }
+      for (const p of paths) send("file_modified", { path: String(p) });
     } catch (_e) {}
   });
 }

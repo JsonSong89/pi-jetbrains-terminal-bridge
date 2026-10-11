@@ -27,9 +27,10 @@ It is **not** a vibe-coding cockpit. It is for people who want more control over
   - rename a conversation in the panel (duplicates forbidden)
 - **One-click launch** — the toolbar button opens a dedicated Pi tab in the Terminal tool window and runs `pi` with your configured model / thinking level / extra args.
 - **Send to Pi** — select code in the editor, right-click → *Send to Pi*, and a file reference (`@path/file.go#L10-25`) lands in Pi's input.
+- **Stay in sync with Pi's writes** — as soon as Pi finishes a write/edit tool, the IDE refreshes that file so you don't wait on the ~10s VFS poll. Optionally also open the file in the editor.
 - **Notifications (opt-in)**
   - balloon when the agent finishes (including error/abort reason) — only while the IDE is in the background; click to focus that terminal
-  - automatically refresh + open files Pi edited
+  - open files Pi edited (still opt-in; refresh itself is always on)
 - **Diagnostics** — Settings shows the bridge extension state and server port.
 
 ## How the bridge works
@@ -84,7 +85,7 @@ power — combine them freely.
 |---|---|
 | Model / thinking level / extra args | Passed to the `pi` CLI at launch |
 | Notify on agent end | Balloon when a conversation's agent settles (opt-in; only if the IDE is in the background; click to focus that terminal) |
-| Open files modified by Pi | Refresh + open in editor after writes (opt-in) |
+| Open files modified by Pi | Also open the file in the editor after a write (opt-in). VFS refresh is always on. |
 | Bridge diagnostics | Read-only: extension state + server port |
 
 ## Keyboard shortcuts

@@ -5,9 +5,11 @@ import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.Logger
+import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.vfs.VirtualFileManager
+import com.intellij.openapi.vfs.LocalFileSystem
+import com.intellij.openapi.vfs.VfsUtil
 import com.intellij.openapi.wm.ToolWindowManager
 import com.piterminal.bridge.PiBridgeUi
 import com.piterminal.bridge.services.PiStatusWidget
@@ -388,29 +390,45 @@ class PiConversationService(private val project: Project) {
         notifyListeners(ChangeEvent(ChangeKind.STATE, tabKey))
     }
 
-    /** Pi edited a file; optionally refresh + open it in the editor. */
+    /** Pi wrote a file; sync the VFS immediately so the editor doesn't wait on the ~10s poll. */
     fun onBridgeFileModified(tabKey: String, path: String) {
-        if (!PiSettings.getInstance().state.openModifiedFiles) return
+        val openAfter = PiSettings.getInstance().state.openModifiedFiles
         val app = ApplicationManager.getApplication()
-        // Refresh off-EDT, then open on EDT. Never inside a write action —
-        // VFS refresh + openFile in runWriteAction can freeze the IDE.
+        // Refresh off-EDT. Never inside a write action — VFS refresh + openFile
+        // in runWriteAction can freeze the IDE.
         app.executeOnPooledThread {
             try {
                 val nioPath = Paths.get(path).let {
-                    // pi may report project-relative paths; resolve against the project root.
                     if (!it.isAbsolute && project.basePath != null) {
                         Paths.get(project.basePath).resolve(it)
                     } else it
                 }
-                VirtualFileManager.getInstance().refreshAndFindFileByNioPath(nioPath)?.let { file ->
-                    app.invokeLater {
-                        if (!project.isDisposed && file.isValid) {
-                            FileEditorManager.getInstance(project).openFile(file, false)
-                        }
+                val ioFile = nioPath.toFile()
+                val lfs = LocalFileSystem.getInstance()
+                VfsUtil.markDirtyAndRefresh(false, false, false, ioFile)
+                var file = lfs.findFileByIoFile(ioFile)
+                if (file == null) {
+                    ioFile.parentFile?.let { parent ->
+                        lfs.refreshAndFindFileByIoFile(parent)?.refresh(false, false)
+                    }
+                    file = lfs.refreshAndFindFileByIoFile(ioFile)
+                } else {
+                    file.refresh(false, false)
+                }
+                val vf = file ?: return@executeOnPooledThread
+                app.invokeLater {
+                    if (project.isDisposed || !vf.isValid) return@invokeLater
+                    val documents = FileDocumentManager.getInstance()
+                    val doc = documents.getCachedDocument(vf)
+                    if (doc != null && !documents.isFileModified(vf)) {
+                        documents.reloadFromDisk(doc)
+                    }
+                    if (openAfter) {
+                        FileEditorManager.getInstance(project).openFile(vf, false)
                     }
                 }
             } catch (e: Exception) {
-                logger.warn("Failed to open modified file $path: ${e.message}")
+                logger.warn("Failed to refresh modified file $path: ${e.message}")
             }
         }
     }

@@ -87,7 +87,10 @@ class PiSettingsConfigurable : Configurable {
             "Notify when the agent finishes (only if the IDE is in the background; click to focus the terminal)",
             settings.notifyOnAgentEnd
         )
-        openModifiedFilesCheck = JCheckBox("Open files modified by Pi in the editor", settings.openModifiedFiles)
+        openModifiedFilesCheck = JCheckBox(
+            "Open files modified by Pi in the editor (the project always refreshes as soon as Pi writes)",
+            settings.openModifiedFiles
+        )
 
         panel = FormBuilder.createFormBuilder()
             // Model section
