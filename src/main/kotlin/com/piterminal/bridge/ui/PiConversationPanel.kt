@@ -744,7 +744,7 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
             isOpaque = true
             add(title, BorderLayout.CENTER)
             add(deleteHint, BorderLayout.EAST)
-            border = JBUI.Borders.empty(2, 6)
+            border = JBUI.Borders.empty(2, 6, 2, 0)
         }
 
         override fun getListCellRendererComponent(
@@ -769,7 +769,7 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
             deleteHint.isVisible = showDelete
             if (showDelete) {
                 deleteHint.isOpaque = overDelete
-                deleteHint.border = JBUI.Borders.empty(1, 6)
+                deleteHint.border = JBUI.Borders.empty(1, 2, 1, 0)
                 deleteHint.background = if (overDelete) {
                     JBUI.CurrentTheme.ActionButton.hoverBackground()
                 } else {
