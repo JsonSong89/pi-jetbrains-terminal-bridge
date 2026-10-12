@@ -708,16 +708,9 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
         val popup = combo.ui.getAccessibleChild(combo, 0) as? ComboPopup ?: return
         val list = popup.list
         list.border = JBUI.Borders.empty()
-        var parent = list.parent
-        while (parent != null) {
-            if (parent is JScrollPane) {
-                parent.border = JBUI.Borders.empty()
-                parent.viewportBorder = JBUI.Borders.empty()
-                break
-            }
-            if (parent is JComponent) parent.border = JBUI.Borders.empty()
-            parent = parent.parent
-        }
+        val scroll = SwingUtilities.getAncestorOfClass(JScrollPane::class.java, list) as? JScrollPane ?: return
+        scroll.border = JBUI.Borders.empty()
+        scroll.viewportBorder = null
     }
 
     private fun deleteHitIndex(list: JList<*>, e: MouseEvent): Int {
