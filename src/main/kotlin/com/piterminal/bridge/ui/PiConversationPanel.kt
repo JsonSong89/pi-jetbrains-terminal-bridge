@@ -60,6 +60,7 @@ import javax.swing.JComponent
 import javax.swing.JLabel
 import javax.swing.JList
 import javax.swing.JPanel
+import javax.swing.JScrollPane
 import javax.swing.KeyStroke
 import javax.swing.ScrollPaneConstants
 import javax.swing.SwingUtilities
@@ -136,7 +137,11 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
             combo.addPopupMenuListener(object : PopupMenuListener {
             override fun popupMenuWillBecomeVisible(e: PopupMenuEvent) {
                 installComboDeleteClickHandler()
-                SwingUtilities.invokeLater { installComboDeleteClickHandler() }
+                tightenComboPopupInsets()
+                SwingUtilities.invokeLater {
+                    installComboDeleteClickHandler()
+                    tightenComboPopupInsets()
+                }
             }
             override fun popupMenuWillBecomeInvisible(e: PopupMenuEvent) {
                 comboDeleteHoverIndex = -1
@@ -657,6 +662,7 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
             return
         }
         list.putClientProperty("pi-combo-delete", true)
+        tightenComboPopupInsets()
         list.addMouseListener(object : MouseAdapter() {
             override fun mousePressed(e: MouseEvent) {
                 if (handleComboDeleteClick(list, e)) {
@@ -698,6 +704,22 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
         comboDeleteClickInstalled = true
     }
 
+    private fun tightenComboPopupInsets() {
+        val popup = combo.ui.getAccessibleChild(combo, 0) as? ComboPopup ?: return
+        val list = popup.list
+        list.border = JBUI.Borders.empty()
+        var parent = list.parent
+        while (parent != null) {
+            if (parent is JScrollPane) {
+                parent.border = JBUI.Borders.empty()
+                parent.viewportBorder = JBUI.Borders.empty()
+                break
+            }
+            if (parent is JComponent) parent.border = JBUI.Borders.empty()
+            parent = parent.parent
+        }
+    }
+
     private fun deleteHitIndex(list: JList<*>, e: MouseEvent): Int {
         val index = list.locationToIndex(e.point)
         if (index < 0) return -1
@@ -733,11 +755,11 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
     private inner class ConversationComboRenderer : JPanel(BorderLayout()), javax.swing.ListCellRenderer<PiConversation> {
         private val title = JLabel()
         private val deleteHint = JLabel("×").apply {
-            horizontalAlignment = JLabel.CENTER
+            horizontalAlignment = JLabel.RIGHT
             verticalAlignment = JLabel.CENTER
             font = JBUI.Fonts.smallFont()
             isOpaque = false
-            preferredSize = Dimension(JBUI.scale(22), JBUI.scale(18))
+            border = JBUI.Borders.empty()
         }
 
         init {
@@ -769,13 +791,16 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
             deleteHint.isVisible = showDelete
             if (showDelete) {
                 deleteHint.isOpaque = overDelete
-                deleteHint.border = JBUI.Borders.empty(1, 2, 1, 0)
+                deleteHint.border = JBUI.Borders.empty()
                 deleteHint.background = if (overDelete) {
                     JBUI.CurrentTheme.ActionButton.hoverBackground()
                 } else {
                     null
                 }
                 deleteHint.foreground = JBUI.CurrentTheme.ContextHelp.FOREGROUND
+            }
+            if (index >= 0 && list.width > 0) {
+                preferredSize = Dimension(list.width, preferredSize.height)
             }
             val selectedBg = list.selectionBackground
             val selectedFg = list.selectionForeground
