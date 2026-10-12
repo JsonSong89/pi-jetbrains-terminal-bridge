@@ -60,7 +60,6 @@ import javax.swing.JComponent
 import javax.swing.JLabel
 import javax.swing.JList
 import javax.swing.JPanel
-import javax.swing.JScrollPane
 import javax.swing.KeyStroke
 import javax.swing.ScrollPaneConstants
 import javax.swing.SwingUtilities
@@ -137,11 +136,7 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
             combo.addPopupMenuListener(object : PopupMenuListener {
             override fun popupMenuWillBecomeVisible(e: PopupMenuEvent) {
                 installComboDeleteClickHandler()
-                tightenComboPopupInsets()
-                SwingUtilities.invokeLater {
-                    installComboDeleteClickHandler()
-                    tightenComboPopupInsets()
-                }
+                SwingUtilities.invokeLater { installComboDeleteClickHandler() }
             }
             override fun popupMenuWillBecomeInvisible(e: PopupMenuEvent) {
                 comboDeleteHoverIndex = -1
@@ -662,7 +657,6 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
             return
         }
         list.putClientProperty("pi-combo-delete", true)
-        tightenComboPopupInsets()
         list.addMouseListener(object : MouseAdapter() {
             override fun mousePressed(e: MouseEvent) {
                 if (handleComboDeleteClick(list, e)) {
@@ -704,15 +698,6 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
         comboDeleteClickInstalled = true
     }
 
-    private fun tightenComboPopupInsets() {
-        val popup = combo.ui.getAccessibleChild(combo, 0) as? ComboPopup ?: return
-        val list = popup.list
-        list.border = JBUI.Borders.empty()
-        val scroll = SwingUtilities.getAncestorOfClass(JScrollPane::class.java, list) as? JScrollPane ?: return
-        scroll.border = JBUI.Borders.empty()
-        scroll.viewportBorder = null
-    }
-
     private fun deleteHitIndex(list: JList<*>, e: MouseEvent): Int {
         val index = list.locationToIndex(e.point)
         if (index < 0) return -1
@@ -752,14 +737,13 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
             verticalAlignment = JLabel.CENTER
             font = JBUI.Fonts.smallFont()
             isOpaque = false
-            border = JBUI.Borders.empty()
         }
 
         init {
             isOpaque = true
             add(title, BorderLayout.CENTER)
             add(deleteHint, BorderLayout.EAST)
-            border = JBUI.Borders.empty(2, 6, 2, 0)
+            border = JBUI.Borders.empty(2, 6)
         }
 
         override fun getListCellRendererComponent(
@@ -784,16 +768,12 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
             deleteHint.isVisible = showDelete
             if (showDelete) {
                 deleteHint.isOpaque = overDelete
-                deleteHint.border = JBUI.Borders.empty()
                 deleteHint.background = if (overDelete) {
                     JBUI.CurrentTheme.ActionButton.hoverBackground()
                 } else {
                     null
                 }
                 deleteHint.foreground = JBUI.CurrentTheme.ContextHelp.FOREGROUND
-            }
-            if (index >= 0 && list.width > 0) {
-                preferredSize = Dimension(list.width, preferredSize.height)
             }
             val selectedBg = list.selectionBackground
             val selectedFg = list.selectionForeground
