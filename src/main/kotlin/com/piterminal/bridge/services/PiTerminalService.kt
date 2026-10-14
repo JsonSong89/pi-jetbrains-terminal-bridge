@@ -160,6 +160,7 @@ class PiTerminalService(private val project: Project) : Disposable {
         )
         val widget = createMethod.invoke(manager, workingDir, tabName)
         val component = widget.javaClass.getMethod("getComponent").invoke(widget) as JComponent
+        component.putClientProperty(PiBridgeUi.TERMINAL_FOCUS_PROPERTY, conversationId)
 
         val session = TerminalSession(
             conversationId = conversationId,

@@ -89,6 +89,8 @@ Pi 标签页是**真实终端里跑着完整的 pi TUI** —— 所有斜杠命�
 
 - `Ctrl+Shift+P` —— 打开 Pi 会话窗口
 - `Alt+Shift+3` —— 发送选中内容 / 文件到 Pi
+- `Ctrl+Alt+Shift+T` —— 焦点到 Pi 终端（仅在 prompt 输入框内生效，不会在编辑器里抢走 Refactor This）
+- `Ctrl+Alt+Shift+E` —— 焦点到 Pi prompt（仅在 Pi 终端内生效）
 
 ## 构建
 

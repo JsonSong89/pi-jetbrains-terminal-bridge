@@ -33,6 +33,7 @@ import java.awt.datatransfer.DataFlavor
 import java.awt.datatransfer.StringSelection
 import java.awt.datatransfer.Transferable
 import java.awt.datatransfer.Clipboard
+import com.piterminal.bridge.PiBridgeUi
 import com.piterminal.bridge.PiFileRefs
 import com.piterminal.bridge.conversations.PiConversation
 import com.piterminal.bridge.conversations.PiConversationService
@@ -107,6 +108,8 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
             if (event.kind == ChangeKind.DRAFT_APPENDED) {
                 inputArea.requestFocusInWindow()
                 inputArea.caretPosition = inputArea.document.length
+            } else if (event.kind == ChangeKind.FOCUS_INPUT) {
+                inputArea.requestFocusInWindow()
             }
         }
     }
@@ -194,6 +197,7 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
         }
 
         inputArea.apply {
+            putClientProperty(PiBridgeUi.PROMPT_FOCUS_PROPERTY, true)
             lineWrap = true
             wrapStyleWord = true
             emptyText.text = "Message the active conversation…"

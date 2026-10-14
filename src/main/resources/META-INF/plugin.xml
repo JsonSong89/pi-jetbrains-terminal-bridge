@@ -55,6 +55,8 @@
     <ul>
         <li><code>Ctrl+Shift+P</code> — Open the Pi conversation window</li>
         <li><code>Alt+Shift+3</code> — Send selection / file to Pi</li>
+        <li><code>Ctrl+Alt+Shift+T</code> — Focus the Pi terminal (only while the prompt is focused)</li>
+        <li><code>Ctrl+Alt+Shift+E</code> — Focus the Pi prompt (only while a Pi terminal is focused)</li>
     </ul>
     <p>Both are rebindable in <b>Settings → Keymap → Pi Terminal Bridge</b>.</p>
 
@@ -112,6 +114,8 @@
     <ul>
         <li><code>Ctrl+Shift+P</code> —— 打开 Pi 会话窗口</li>
         <li><code>Alt+Shift+3</code> —— 发送选中内容 / 文件到 Pi</li>
+        <li><code>Ctrl+Alt+Shift+T</code> —— 焦点到 Pi 终端（仅在 prompt 输入框内生效）</li>
+        <li><code>Ctrl+Alt+Shift+E</code> —— 焦点到 Pi prompt（仅在 Pi 终端内生效）</li>
     </ul>
     <p>均可在 <b>Settings → Keymap → Pi Terminal Bridge</b> 中修改。</p>
 
@@ -189,6 +193,20 @@
                 description="Open the Pi conversation window (focus existing or start one)"
                 icon="/icons/pi.svg">
             <keyboard-shortcut keymap="$default" first-keystroke="ctrl shift P"/>
+        </action>
+
+        <action id="Pi.FocusTerminal"
+                class="com.piterminal.bridge.actions.FocusPiTerminalAction"
+                text="Focus Pi Terminal"
+                description="Focus the Pi terminal. Active only while the prompt input is focused.">
+            <keyboard-shortcut keymap="$default" first-keystroke="ctrl alt shift T"/>
+        </action>
+
+        <action id="Pi.FocusInput"
+                class="com.piterminal.bridge.actions.FocusPiInputAction"
+                text="Focus Pi Prompt"
+                description="Focus the Pi prompt input. Active only while a Pi terminal tab is focused.">
+            <keyboard-shortcut keymap="$default" first-keystroke="ctrl alt shift E"/>
         </action>
 
         <!-- Send selection from editor -->

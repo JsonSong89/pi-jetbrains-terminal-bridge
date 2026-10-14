@@ -8,11 +8,32 @@ import com.intellij.notification.NotificationType
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.wm.WindowManager
+import java.awt.Component
+import javax.swing.JComponent
 import javax.swing.event.HyperlinkEvent
 
 object PiBridgeUi {
     const val TOOL_WINDOW_ID = "Pi Bridge"
     const val NOTIFICATION_GROUP_ID = "Pi Bridge"
+    const val PROMPT_FOCUS_PROPERTY = "pi-prompt-input"
+    const val TERMINAL_FOCUS_PROPERTY = "pi-terminal"
+
+    fun isPromptFocused(component: Component?): Boolean =
+        ancestorProperty(component, PROMPT_FOCUS_PROPERTY) != null
+
+    fun terminalConversationId(component: Component?): String? =
+        ancestorProperty(component, TERMINAL_FOCUS_PROPERTY) as? String
+
+    private fun ancestorProperty(component: Component?, key: String): Any? {
+        var current = component
+        while (current != null) {
+            if (current is JComponent) {
+                current.getClientProperty(key)?.let { return it }
+            }
+            current = current.parent
+        }
+        return null
+    }
 
     fun isIdeActive(project: Project): Boolean {
         val frame = WindowManager.getInstance().getFrame(project) ?: return false

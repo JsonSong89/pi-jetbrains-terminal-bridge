@@ -41,7 +41,8 @@ class PiConversationService(private val project: Project) {
         STRUCTURE,
         DRAFT_APPENDED,
         SENT,
-        STATE
+        STATE,
+        FOCUS_INPUT
     }
 
     data class ChangeEvent(
@@ -295,6 +296,21 @@ class PiConversationService(private val project: Project) {
             toolWindow.activate(null)
         } else {
             toolWindow.show()
+        }
+    }
+
+    /** Show the Pi panel and put caret in the prompt. */
+    fun focusInput(conversationId: String? = null) {
+        if (conversationId != null) {
+            synchronized(conversations) {
+                if (conversations.containsKey(conversationId)) activeId = conversationId
+            }
+            persist()
+            notifyListeners(ChangeEvent(ChangeKind.STRUCTURE, conversationId))
+        }
+        val toolWindow = ToolWindowManager.getInstance(project).getToolWindow(TOOL_WINDOW_ID) ?: return
+        toolWindow.activate {
+            notifyListeners(ChangeEvent(ChangeKind.FOCUS_INPUT, activeId))
         }
     }
 

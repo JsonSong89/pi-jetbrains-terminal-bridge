@@ -90,10 +90,12 @@ power — combine them freely.
 
 ## Keyboard shortcuts
 
-Defaults — both rebindable in **Settings → Keymap → "Pi Terminal Bridge"**:
+Defaults — rebindable in **Settings → Keymap → "Pi Terminal Bridge"**:
 
 - `Ctrl+Shift+P` — open the Pi conversation window
 - `Alt+Shift+3` — send selection / file to Pi
+- `Ctrl+Alt+Shift+T` — focus the Pi terminal (only while the prompt input is focused; does not steal Refactor This from the editor)
+- `Ctrl+Alt+Shift+E` — focus the Pi prompt (only while a Pi terminal tab is focused)
 
 ## Build
 
