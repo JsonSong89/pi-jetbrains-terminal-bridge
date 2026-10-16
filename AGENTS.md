@@ -36,6 +36,11 @@ pi 侧 extension 源码以 Kotlin 常量内联在 `PiBridgeInstaller` 中，安�
 - 兜底：resume 判定收敛在 launch 时刻（jsonl 必已落盘；先扫默认项目目录，再跨 `sessions/` 子目录按 `*_<id>.jsonl` 搜，扫不到退回 `--session-id` 让 pi 自己解析）；不做启动期清空 / mtime 重绑（terminal 进程随 IDE 关闭终止，理由见设计文档 §七）
 - rename 禁止重名（含归档标题查重）；删除会话不删 pi 侧 jsonl
 
+## 构建与验证
+
+- **不要主动在本地构建**（`./gradlew build` / `compileKotlin` 等）：IDEA 插件构建成本高，改完直接 commit + push，由 GitHub Actions 构建验证
+- 本地最多做静态检查（读代码、对拍 pi 文档），编译问题交给 CI
+
 ## 文档同步约定
 
 每个功能迭代（P0/P1/P2）合入时同步更新 `README.md` / `README.zh-CN.md`；设计变更先改 `docs/tasks/` 里的设计文档再写代码。

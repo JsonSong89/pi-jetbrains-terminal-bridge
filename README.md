@@ -73,6 +73,14 @@ command works exactly as on the command line:
   - `/fork` an ongoing conversation to explore a branch while the original stays in the panel
   - `/new` after wrapping up — the previous session is archived in the panel, still resumable later
 
+Each user-message card in the panel also carries a **Fork** button (branch icon,
+next to Copy and Delete). It matches pi's `/fork` semantics exactly: the new
+conversation `<original>-fork` gets the history **before** that message, and the
+message text returns to the panel's input so you can edit and re-send it — the
+original conversation stays untouched. Under the hood the plugin launches pi
+with `--fork <session>` and the bridge extension's `/bridge-fork` command
+truncates the copy at the selected message.
+
 In short: the IDE panel gives you structure (persistent list, working badges,
 archived sessions, click-to-resume), the TUI gives you pi's full interactive
 power — combine them freely.

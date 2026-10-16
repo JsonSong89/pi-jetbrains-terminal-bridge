@@ -12,6 +12,7 @@ import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VfsUtil
 import com.intellij.openapi.wm.ToolWindowManager
 import com.piterminal.bridge.PiBridgeUi
+import com.piterminal.bridge.bridge.PiBridgeServer
 import com.piterminal.bridge.services.PiStatusWidget
 import com.piterminal.bridge.services.PiTerminalService
 import com.piterminal.bridge.settings.PiSettings
@@ -60,6 +61,10 @@ class PiConversationService(private val project: Project) {
     private val boundTabs = mutableSetOf<String>()
     /** Latest model per conversation id (bridge model_changed). */
     private val models = mutableMapOf<String, String>()
+    /** Conversation ids with an in-flight message fork (no archive on rebind). */
+    private val forkingIds = mutableSetOf<String>()
+    /** Conversation id -> base64 message text awaiting the /bridge-fork command. */
+    private val pendingForkCommands = java.util.concurrent.ConcurrentHashMap<String, String>()
 
     init {
         loadFromStore()
@@ -120,6 +125,67 @@ class PiConversationService(private val project: Project) {
         terminal().launch(conversation.id, conversation.tabName, conversation.piSessionId, conversation.title)
         PiStatusWidget.update(project)
         notifyListeners(ChangeEvent(ChangeKind.STRUCTURE, conversation.id))
+        return conversation
+    }
+
+    /**
+     * Forks [id] at user message [messageIndex] using pi's fork semantics:
+     * the new conversation "<source>-fork" carries the history BEFORE that
+     * message, and the message text is pre-filled in the draft so the user
+     * can edit and re-send it (mirroring pi's /fork putting the text back in
+     * the editor). The new terminal starts from a full --fork copy of the
+     * source session; once the bridge reports the first bind, the plugin sends
+     * the extension's /bridge-fork command to truncate at that message.
+     */
+    fun forkConversation(id: String, messageIndex: Int): PiConversation? {
+        val source = get(id) ?: return null
+        if (messageIndex !in source.messages.indices) return null
+        if (PiBridgeServer.getInstance(project).endpoint() == null) {
+            showNotification(
+                "The Pi bridge channel is unavailable; forking needs it. " +
+                    "Check the Terminal shell (PowerShell / POSIX, not cmd.exe).",
+                NotificationType.WARNING
+            )
+            return null
+        }
+        val workingDir = project.basePath ?: System.getProperty("user.home")
+        val hasSession = source.piSessionId.isNotBlank() &&
+            (source.piSessionId != source.id ||
+                PiTerminalService.findSessionFile(source.piSessionId, workingDir) != null)
+        if (!hasSession) {
+            showNotification(
+                "${source.title} has no Pi session yet; nothing to fork.",
+                NotificationType.WARNING
+            )
+            return null
+        }
+        val forkMessage = source.messages[messageIndex]
+        val conversation = PiConversation(
+            id = UUID.randomUUID().toString(),
+            title = uniqueForkTitle(source.title),
+            tabName = source.tabName,
+            piSessionId = UUID.randomUUID().toString(),
+            messages = source.messages.subList(0, messageIndex).toMutableList(),
+            draft = forkMessage.text
+        )
+        synchronized(conversations) {
+            conversations[conversation.id] = conversation
+            activeId = conversation.id
+        }
+        persist()
+        synchronized(forkingIds) { forkingIds.add(conversation.id) }
+        pendingForkCommands[conversation.id] =
+            java.util.Base64.getEncoder().encodeToString(forkMessage.text.toByteArray(Charsets.UTF_8))
+        terminal().launch(
+            conversation.id,
+            conversation.tabName,
+            conversation.piSessionId,
+            conversation.title,
+            forkOf = source.piSessionId
+        )
+        PiStatusWidget.update(project)
+        notifyListeners(ChangeEvent(ChangeKind.STRUCTURE, conversation.id))
+        notifyListeners(ChangeEvent(ChangeKind.DRAFT_APPENDED, conversation.id))
         return conversation
     }
 
@@ -338,6 +404,18 @@ class PiConversationService(private val project: Project) {
             persist()
             logger.info("Bound conversation ${conversation.id} to pi session $sessionId")
             notifyListeners(ChangeEvent(ChangeKind.STRUCTURE, conversation.id))
+            schedulePendingForkCommand(conversation.id)
+            return
+        }
+        val inFlightFork = synchronized(forkingIds) { forkingIds.remove(tabKey) }
+        if (inFlightFork) {
+            // The /bridge-fork command truncated the copied session: adopt the
+            // branched session id without archiving — the intermediate full
+            // copy was a transient transport, not a conversation worth keeping.
+            conversation.piSessionId = sessionId
+            persist()
+            logger.info("Forked conversation ${conversation.id} to pi session $sessionId")
+            notifyListeners(ChangeEvent(ChangeKind.STRUCTURE, conversation.id))
             return
         }
         // Rebind: the tab keeps its stable id and now represents the new pi
@@ -451,6 +529,21 @@ class PiConversationService(private val project: Project) {
 
     // ---- internals ----
 
+    /** Once pi booted (first bind), tell the extension to fork at the message. */
+    private fun schedulePendingForkCommand(conversationId: String) {
+        val encoded = pendingForkCommands.remove(conversationId) ?: return
+        ApplicationManager.getApplication().executeOnPooledThread {
+            try {
+                // Give the TUI a moment to finish init after session_start.
+                Thread.sleep(1500)
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+                return@executeOnPooledThread
+            }
+            terminal().sendText(conversationId, "/bridge-fork $encoded")
+        }
+    }
+
     private fun loadFromStore() {
         val stored = store().snapshot()
         synchronized(conversations) {
@@ -477,6 +570,18 @@ class PiConversationService(private val project: Project) {
 
     private fun persist() {
         store().save(all(), activeId)
+    }
+
+    /** Fork titles must stay unique too — fork twice and the second gets a suffix. */
+    private fun uniqueForkTitle(baseTitle: String): String {
+        val existing = all().map { it.title }.toSet()
+        var candidate = "$baseTitle-fork"
+        var n = 2
+        while (candidate in existing) {
+            candidate = "$baseTitle-fork ($n)"
+            n++
+        }
+        return candidate
     }
 
     /** Archive titles must stay unique too — rename forbids duplicates. */

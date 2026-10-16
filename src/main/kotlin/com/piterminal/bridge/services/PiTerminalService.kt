@@ -70,7 +70,13 @@ class PiTerminalService(private val project: Project) : Disposable {
         listeners.add(listener)
     }
 
-    fun launch(conversationId: String, tabName: String, piSessionId: String, title: String) {
+    fun launch(
+        conversationId: String,
+        tabName: String,
+        piSessionId: String,
+        title: String,
+        forkOf: String? = null
+    ) {
         val existing = sessions[conversationId]
         if (existing != null && isTerminalAlive(existing)) {
             selectTab(conversationId, requestFocus = false)
@@ -85,7 +91,7 @@ class PiTerminalService(private val project: Project) : Disposable {
             val workingDir = project.basePath ?: System.getProperty("user.home")
             createTerminalTab(conversationId, tabName, workingDir)
             PiStatusWidget.update(project)
-            startPiWithDelay(conversationId, piSessionId, title, workingDir)
+            startPiWithDelay(conversationId, piSessionId, title, workingDir, forkOf)
         } catch (e: Exception) {
             logger.error("Failed to launch Pi terminal for $tabName", e)
             reset(conversationId, notify = false)
@@ -252,7 +258,8 @@ class PiTerminalService(private val project: Project) : Disposable {
         conversationId: String,
         piSessionId: String,
         title: String,
-        workingDir: String
+        workingDir: String,
+        forkOf: String? = null
     ) {
         PiBridgeInstaller.ensureInstalled()
         val endpoint = PiBridgeServer.getInstance(project).ensureStarted()
@@ -297,7 +304,16 @@ class PiTerminalService(private val project: Project) : Disposable {
 
             append(settings.piCommand)
 
-            if (existingFile != null) {
+            if (forkOf != null) {
+                // Fork: copy the source session into a brand-new session file.
+                // Prefer the explicit jsonl path; fall back to the raw id and let
+                // pi resolve it (it searches the current project first).
+                // --session-id picks the new session's id; --fork never combines
+                // with --session/--continue/--resume.
+                val sourceFile = findSessionFile(forkOf, workingDir)
+                append(" --fork ${quote(sourceFile?.toString() ?: forkOf)}")
+                append(" --session-id ${quote(piSessionId)}")
+            } else if (existingFile != null) {
                 // Explicit path: pi's path branch opens it directly (a path
                 // containing a separator / ending in .jsonl needs no --session-dir).
                 append(" --session ${quote(existingFile.toString())}")

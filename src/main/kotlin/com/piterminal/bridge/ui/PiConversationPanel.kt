@@ -399,16 +399,20 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
             font = PiSettings.getInstance().conversationFont()
             border = JBUI.Borders.empty(4, 0, 2, 0)
         }
+        val fork = iconButton(AllIcons.Vcs.Branch, "Fork conversation at this message") {
+            conversations.forkConversation(conversationId, index)
+        }
         val copy = iconButton(AllIcons.Actions.Copy, "Copy") {
             CopyPasteManager.getInstance().setContents(StringSelection(message.text))
         }
-        val delete = iconButton(AllIcons.General.Remove, "Delete") {
+        val delete = iconButton(AllIcons.General.Delete, "Delete") {
             conversations.deleteMessage(conversationId, index)
         }
         val actions = JPanel(FlowLayout(FlowLayout.RIGHT, JBUI.scale(4), 0)).apply {
             isOpaque = false
-            add(delete)
+            add(fork)
             add(copy)
+            add(delete)
         }
         body.rows = message.text.lines().size.coerceIn(1, 20)
         return object : JPanel(BorderLayout()) {
@@ -438,7 +442,7 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
             isOpaque = false
             isFocusable = false
             margin = JBUI.emptyInsets()
-            preferredSize = Dimension(JBUI.scale(22), JBUI.scale(22))
+            preferredSize = Dimension(JBUI.scale(18), JBUI.scale(18))
             addMouseListener(object : MouseAdapter() {
                 override fun mouseEntered(e: MouseEvent) {
                     isOpaque = true

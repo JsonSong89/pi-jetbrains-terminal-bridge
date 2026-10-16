@@ -18,7 +18,7 @@ object PiBridgeInstaller {
 
     private val logger = Logger.getInstance(PiBridgeInstaller::class.java)
 
-    private const val VERSION = 3
+    private const val VERSION = 4
 
     // language=TypeScript
     private val SOURCE = """
@@ -130,6 +130,37 @@ export default function (pi) {
       }
       for (const p of paths) send("file_modified", { path: String(p) });
     } catch (_e) {}
+  });
+  // IDE-side "Fork" button on a message card: fork this session at that
+  // message (pi's /fork semantics — history before the message, the message
+  // text returns to the IDE panel's draft for editing). The IDE launches pi
+  // with --fork <source> (full copy), then sends this command with the
+  // message text base64-encoded. We locate the matching user entry on the
+  // active branch (newest first) and fork before it; the resulting
+  // session_changed report rebinds the IDE conversation to the new session.
+  pi.registerCommand("bridge-fork", {
+    description: "Internal: fork the current session at a message (Pi Terminal Bridge)",
+    handler: async (args, ctx) => {
+      if (!enabled()) return;
+      try {
+        const text = Buffer.from(String(args || "").trim(), "base64").toString("utf8");
+        if (!text) return;
+        const branch = ctx.sessionManager.getBranch();
+        for (let i = branch.length - 1; i >= 0; i--) {
+          const e = branch[i];
+          if (!e || e.type !== "message" || !e.message || e.message.role !== "user") continue;
+          const c = e.message.content;
+          const t = typeof c === "string" ? c : Array.isArray(c) ? c.filter(x => x && x.type === "text").map(x => x.text).join("") : "";
+          if (t === text) {
+            await ctx.fork(e.id);
+            return;
+          }
+        }
+        try { ctx.ui.notify("bridge-fork: matching message not found", "warn"); } catch (_e) {}
+      } catch (_e) {
+        // best-effort: never break pi
+      }
+    },
   });
 }
 """.trim() + "\n"
