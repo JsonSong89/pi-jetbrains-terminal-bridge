@@ -399,17 +399,21 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
             font = PiSettings.getInstance().conversationFont()
             border = JBUI.Borders.empty(4, 0, 2, 0)
         }
+        val rewind = iconButton(AllIcons.Actions.Undo, "Rewind conversation to this message") {
+            conversations.rewindConversation(conversationId, index)
+        }
         val fork = iconButton(AllIcons.Vcs.Branch, "Fork conversation at this message") {
             conversations.forkConversation(conversationId, index)
         }
         val copy = iconButton(AllIcons.Actions.Copy, "Copy") {
             CopyPasteManager.getInstance().setContents(StringSelection(message.text))
         }
-        val delete = iconButton(AllIcons.General.Delete, "Delete") {
+        val delete = iconButton(AllIcons.General.Delete, "Remove this card from the panel (does not touch the Pi session)") {
             conversations.deleteMessage(conversationId, index)
         }
         val actions = JPanel(FlowLayout(FlowLayout.RIGHT, JBUI.scale(4), 0)).apply {
             isOpaque = false
+            add(rewind)
             add(fork)
             add(copy)
             add(delete)

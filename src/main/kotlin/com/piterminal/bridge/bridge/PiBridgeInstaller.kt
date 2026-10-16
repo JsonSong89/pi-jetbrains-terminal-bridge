@@ -18,7 +18,7 @@ object PiBridgeInstaller {
 
     private val logger = Logger.getInstance(PiBridgeInstaller::class.java)
 
-    private const val VERSION = 4
+    private const val VERSION = 5
 
     // language=TypeScript
     private val SOURCE = """
@@ -157,6 +157,38 @@ export default function (pi) {
           }
         }
         try { ctx.ui.notify("bridge-fork: matching message not found", "warn"); } catch (_e) {}
+      } catch (_e) {
+        // best-effort: never break pi
+      }
+    },
+  });
+  // IDE-side "Rewind" button on a message card: navigate the session tree
+  // back to this message (pi's /tree semantics) — the conversation stays in
+  // the same session file, and everything after this message (the question
+  // and its AI reply included) leaves the active branch, i.e. drops out of
+  // the model context. The tree entry itself stays on disk, like /tree.
+  // Selecting a user message in /tree puts its text in the editor; here the
+  // IDE panel pre-fills the text into its draft instead, then rewinds, so
+  // the user can edit and re-send from the panel.
+  pi.registerCommand("bridge-rewind", {
+    description: "Internal: rewind the session to a message (Pi Terminal Bridge)",
+    handler: async (args, ctx) => {
+      if (!enabled()) return;
+      try {
+        const text = Buffer.from(String(args || "").trim(), "base64").toString("utf8");
+        if (!text) return;
+        const branch = ctx.sessionManager.getBranch();
+        for (let i = branch.length - 1; i >= 0; i--) {
+          const e = branch[i];
+          if (!e || e.type !== "message" || !e.message || e.message.role !== "user") continue;
+          const c = e.message.content;
+          const t = typeof c === "string" ? c : Array.isArray(c) ? c.filter(x => x && x.type === "text").map(x => x.text).join("") : "";
+          if (t === text) {
+            await ctx.navigateTree(e.id);
+            return;
+          }
+        }
+        try { ctx.ui.notify("bridge-rewind: matching message not found", "warn"); } catch (_e) {}
       } catch (_e) {
         // best-effort: never break pi
       }

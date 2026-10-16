@@ -529,6 +529,44 @@ class PiConversationService(private val project: Project) {
 
     // ---- internals ----
 
+    /**
+     * Rewinds the active branch of [id] back to user message [messageIndex]
+     * using pi's navigateTree (the same semantics as selecting the message in
+     * `/tree`): same session, same conversation — everything after the message
+     * (it included, plus the AI reply) leaves the active branch and thus the
+     * model context. The message text is put back in the panel's draft, like
+     * /tree returning the text to the editor, so it can be edited and re-sent.
+     * Needs a live terminal and the bridge channel.
+     */
+    fun rewindConversation(id: String, messageIndex: Int): Boolean {
+        val conversation = get(id) ?: return false
+        if (messageIndex !in conversation.messages.indices) return false
+        if (PiBridgeServer.getInstance(project).endpoint() == null) {
+            showNotification(
+                "The Pi bridge channel is unavailable; rewinding needs it. " +
+                    "Check the Terminal shell (PowerShell / POSIX, not cmd.exe).",
+                NotificationType.WARNING
+            )
+            return false
+        }
+        if (!terminal().isAlive(conversation.id)) {
+            showNotification(
+                "${conversation.title} terminal is closed; restore it first, then rewind.",
+                NotificationType.WARNING
+            )
+            return false
+        }
+        val text = conversation.messages[messageIndex].text
+        conversation.messages = conversation.messages.subList(0, messageIndex).toMutableList()
+        conversation.draft = text
+        persist()
+        val encoded = java.util.Base64.getEncoder().encodeToString(text.toByteArray(Charsets.UTF_8))
+        terminal().sendText(conversation.id, "/bridge-rewind $encoded")
+        notifyListeners(ChangeEvent(ChangeKind.STRUCTURE, conversation.id))
+        notifyListeners(ChangeEvent(ChangeKind.DRAFT_APPENDED, conversation.id))
+        return true
+    }
+
     /** Once pi booted (first bind), tell the extension to fork at the message. */
     private fun schedulePendingForkCommand(conversationId: String) {
         val encoded = pendingForkCommands.remove(conversationId) ?: return

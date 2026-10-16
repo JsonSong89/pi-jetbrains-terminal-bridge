@@ -81,6 +81,13 @@ original conversation stays untouched. Under the hood the plugin launches pi
 with `--fork <session>` and the bridge extension's `/bridge-fork` command
 truncates the copy at the selected message.
 
+The **Rewind** button (undo icon, left of Fork) is the in-session variant for
+pi's `/tree`: it calls `navigateTree` in the same session — no new session, no
+terminal restart — so everything after that message (its AI reply included)
+drops out of the active branch and the model context, and the message text is
+pre-filled in the panel for editing. Rewind, then ask your next question from
+exactly that point. The tree entries stay in the jsonl, exactly like `/tree`.
+
 In short: the IDE panel gives you structure (persistent list, working badges,
 archived sessions, click-to-resume), the TUI gives you pi's full interactive
 power — combine them freely.
