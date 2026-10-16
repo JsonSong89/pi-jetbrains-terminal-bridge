@@ -557,7 +557,8 @@ class PiConversationService(private val project: Project) {
             return false
         }
         val text = conversation.messages[messageIndex].text
-        conversation.messages = conversation.messages.subList(0, messageIndex).toMutableList()
+        // messages is a constructor val: trim in place instead of reassigning.
+        conversation.messages.subList(messageIndex, conversation.messages.size).clear()
         conversation.draft = text
         persist()
         val encoded = java.util.Base64.getEncoder().encodeToString(text.toByteArray(Charsets.UTF_8))

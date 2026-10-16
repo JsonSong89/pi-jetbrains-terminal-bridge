@@ -18,7 +18,7 @@ object PiBridgeInstaller {
 
     private val logger = Logger.getInstance(PiBridgeInstaller::class.java)
 
-    private const val VERSION = 5
+    private const val VERSION = 4
 
     // language=TypeScript
     private val SOURCE = """
