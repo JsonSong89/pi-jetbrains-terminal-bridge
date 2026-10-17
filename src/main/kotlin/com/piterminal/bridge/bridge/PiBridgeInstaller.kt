@@ -114,19 +114,23 @@ export default function (pi) {
 
   // Report from tool_result: the file is actually written by then; a
   // tool_call report would race the write and refresh nothing.
+  // Event shape: { type: "tool_result", toolName, input, details, ... } —
+  // the path lives in input.path for edit/write. Report right after the tool
+  // finishes, while the agent may still be running, so the IDE refreshes
+  // immediately instead of waiting for the run to end.
   pi.on("tool_result", (event, _ctx) => {
     try {
       const data = event?.data ?? event ?? {};
-      const tool = String(data.tool ?? event?.tool ?? "");
-      if (!/edit|write|patch|apply|create|save|replace/i.test(tool)) return;
-      const args = data.args ?? {};
-      const details = data.details ?? data.result ?? {};
+      const tool = String(data.toolName ?? data.tool ?? "");
+      if (tool !== "edit" && tool !== "write" && tool !== "patch" && tool !== "apply") return;
+      const input = data.input ?? data.args ?? {};
       const paths = [];
       const push = (p) => { if (typeof p === "string" && p.length > 0) paths.push(p); };
-      push(args.filePath); push(args.file_path); push(args.path); push(args.file);
+      push(input.path); push(input.filePath); push(input.file_path); push(input.file);
+      const details = data.details ?? data.result ?? {};
       push(details.path); push(details.filePath); push(details.file_path);
-      if (Array.isArray(args.files)) {
-        for (const f of args.files) push(typeof f === "string" ? f : f?.path);
+      if (Array.isArray(input.edits)) {
+        for (const e of input.edits) push(typeof e === "string" ? e : e?.path);
       }
       for (const p of paths) send("file_modified", { path: String(p) });
     } catch (_e) {}
