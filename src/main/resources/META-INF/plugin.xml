@@ -38,6 +38,7 @@
         <li><b>One-click launch</b> from the toolbar in a dedicated Terminal tab</li>
         <li><b>Send to Pi</b> — select code, right-click, and send a file reference (<code>@path/file.go#L10-25</code>) to Pi's input. The panel input also has a context menu and accepts files dropped from the Project view.</li>
         <li><b>Immediate VFS refresh</b> when Pi writes a file — no waiting on the IDE's ~10s disk poll; optionally also open the file</li>
+        <li><b>Fork / Rewind</b> on every message card — fork into a new conversation at that message (pi's <code>/fork</code>), or rewind the current session to it (pi's <code>/tree</code>); in both cases the message text returns to the panel input for editing</li>
         <li><b>Notifications</b> — optional balloon when the agent finishes (only while the IDE is in the background; click to focus that terminal)</li>
         <li><b>Flexible configuration</b> for models, thinking levels, and launch options</li>
     </ul>
@@ -124,6 +125,15 @@
         ]]></description>
 
     <change-notes><![CDATA[
+    <h3>0.3.4</h3>
+    <ul>
+        <li><b>Fork a conversation at any message.</b> Each user-message card has a Fork button (branch icon): it creates a new conversation named <code>&lt;original&gt;-fork</code> that carries the history <b>before</b> that message, with the message text pre-filled in the panel input for editing — exactly pi's <code>/fork</code> semantics, while the original conversation stays untouched.</li>
+        <li><b>Rewind within the current session.</b> The Rewind button (undo icon) is the in-session variant of pi's <code>/tree</code>: it navigates the session tree back to that message in the same session — no new session, no terminal restart — so later questions and AI replies drop out of the model context, and the message text returns to the panel input for re-sending. Tree entries stay in the session file, like <code>/tree</code>.</li>
+        <li><b>Fix: files now refresh immediately while Pi is still working.</b> The bridge's file-write report read the wrong event fields and never fired, leaving the IDE to its ~10s disk poll. Reports now fire per <code>edit</code>/<code>write</code> tool result, so the editor syncs right after each file write.</li>
+        <li>Message-card actions reordered (rewind / fork / copy / delete), smaller icon buttons, and a proper trash icon for delete; the delete tooltip clarifies it only removes the panel card, not the Pi session.</li>
+        <li>Fix: rewind no longer echoes the message text into the terminal's editor; only the panel input carries it.</li>
+        <li>Debug logs (bridge message routing, file-refresh traces) follow the platform convention — enable via Help → Diagnostic Tools → Debug Log Settings with <code>com.piterminal.bridge</code>.</li>
+    </ul>
     <h3>0.3.3</h3>
     <ul>
         <li><b>Fix: resume now finds the right session file.</b> The plugin previously passed the parent <code>sessions</code> directory, so <code>--session &lt;id&gt;</code> failed with <code>No session found matching</code>. It now locates pi's real per-project folder and passes the full <code>.jsonl</code> path on resume.</li>
