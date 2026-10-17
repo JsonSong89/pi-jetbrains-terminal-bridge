@@ -149,7 +149,7 @@ class PiBridgeServer(private val project: Project) : Disposable {
 
     private fun route(tabKey: String, type: String, data: JsonObject) {
         val service = PiConversationService.getInstance(project)
-        com.piterminal.bridge.settings.PiLog.debug("bridge message: type=$type tab=$tabKey data=$data")
+        logger.debug("bridge message: type=$type tab=$tabKey data=$data")
         // Orphan routing: handlers drop unknown tabKeys silently.
         when (type) {
             "session_changed" -> str(data, "sessionId")?.let {

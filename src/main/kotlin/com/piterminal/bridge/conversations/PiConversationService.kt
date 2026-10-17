@@ -486,8 +486,7 @@ class PiConversationService(private val project: Project) {
 
     /** Pi wrote a file; sync the VFS immediately so the editor doesn't wait on the ~10s poll. */
     fun onBridgeFileModified(tabKey: String, path: String) {
-        val conversation = get(tabKey)
-        com.piterminal.bridge.settings.PiLog.debug("file_modified tab=$tabKey path=$path")
+        logger.debug("file_modified tab=$tabKey path=$path")
         val openAfter = PiSettings.getInstance().state.openModifiedFiles
         val app = ApplicationManager.getApplication()
         // Refresh off-EDT. Never inside a write action — VFS refresh + openFile
@@ -512,10 +511,10 @@ class PiConversationService(private val project: Project) {
                     file.refresh(false, false)
                 }
                 val vf = file ?: run {
-                    com.piterminal.bridge.settings.PiLog.debug("file_modified refresh missed: $nioPath")
+                    logger.debug("file_modified refresh missed: $nioPath")
                     return@executeOnPooledThread
                 }
-                com.piterminal.bridge.settings.PiLog.debug("file_modified refreshing ${vf.path} (openAfter=$openAfter)")
+                logger.debug("file_modified refreshing ${vf.path} (openAfter=$openAfter)")
                 app.invokeLater {
                     if (project.isDisposed || !vf.isValid) return@invokeLater
                     val documents = FileDocumentManager.getInstance()
