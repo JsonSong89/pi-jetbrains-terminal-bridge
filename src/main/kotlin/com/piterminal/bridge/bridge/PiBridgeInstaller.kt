@@ -167,9 +167,10 @@ export default function (pi) {
   // the same session file, and everything after this message (the question
   // and its AI reply included) leaves the active branch, i.e. drops out of
   // the model context. The tree entry itself stays on disk, like /tree.
-  // Selecting a user message in /tree puts its text in the editor; here the
-  // IDE panel pre-fills the text into its draft instead, then rewinds, so
-  // the user can edit and re-send from the panel.
+  // Navigating to the message itself would put its text in the TUI editor
+  // (that's /tree's "select a user message" behavior); instead we navigate to
+  // the parent entry — "continue after it" with an empty editor — and the
+  // IDE panel pre-fills the text into its draft for editing.
   pi.registerCommand("bridge-rewind", {
     description: "Internal: rewind the session to a message (Pi Terminal Bridge)",
     handler: async (args, ctx) => {
@@ -183,10 +184,15 @@ export default function (pi) {
           if (!e || e.type !== "message" || !e.message || e.message.role !== "user") continue;
           const c = e.message.content;
           const t = typeof c === "string" ? c : Array.isArray(c) ? c.filter(x => x && x.type === "text").map(x => x.text).join("") : "";
-          if (t === text) {
-            await ctx.navigateTree(e.id);
+          if (t !== text) continue;
+          // parentId is the "continue after it" point; skip the first-ever
+          // message (no parent to land on, branch would already be empty).
+          if (!e.parentId) {
+            try { ctx.ui.notify("bridge-rewind: message is the first entry; nothing before it to rewind to", "warn"); } catch (_e) {}
             return;
           }
+          await ctx.navigateTree(e.parentId);
+          return;
         }
         try { ctx.ui.notify("bridge-rewind: matching message not found", "warn"); } catch (_e) {}
       } catch (_e) {
