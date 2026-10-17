@@ -26,6 +26,7 @@ class PiSettingsConfigurable : Configurable {
     private var conversationFontSizeSpinner: JSpinner? = null
     private var notifyAgentEndCheck: JCheckBox? = null
     private var openModifiedFilesCheck: JCheckBox? = null
+    private var logLevelCombo: ComboBox<String>? = null
 
     companion object {
         const val SEND_CTRL_ENTER = "Ctrl+Enter"
@@ -91,6 +92,10 @@ class PiSettingsConfigurable : Configurable {
             "Open files modified by Pi in the editor (the project always refreshes as soon as Pi writes)",
             settings.openModifiedFiles
         )
+        val logLevelOptions = PiLog.Level.entries.map { it.label }.toTypedArray()
+        logLevelCombo = ComboBox(logLevelOptions).apply {
+            selectedItem = PiLog.Level.fromLabel(settings.logLevel).label
+        }
 
         panel = FormBuilder.createFormBuilder()
             // Model section
@@ -142,6 +147,8 @@ class PiSettingsConfigurable : Configurable {
             }, 0)
             .addComponent(notifyAgentEndCheck!!)
             .addComponent(openModifiedFilesCheck!!)
+            .addLabeledComponent(JBLabel("Log level:"), logLevelCombo!!, 1, false)
+            .addComponentToRightColumn(JBLabel("Bridging and session activity goes to idea.log. debug adds per-file refresh traces (Help → Show Log in Explorer)."), 0)
 
             // Diagnostics (read-only)
             .addSeparator()
@@ -170,7 +177,8 @@ class PiSettingsConfigurable : Configurable {
                 (sendShortcutCombo?.selectedItem == SEND_CTRL_ENTER) != settings.sendWithCtrlEnter ||
                 fontSizeValue() != settings.conversationFontSize ||
                 notifyAgentEndCheck?.isSelected != settings.notifyOnAgentEnd ||
-                openModifiedFilesCheck?.isSelected != settings.openModifiedFiles
+                openModifiedFilesCheck?.isSelected != settings.openModifiedFiles ||
+                logLevelCombo?.selectedItem != PiLog.Level.fromLabel(settings.logLevel).label
     }
 
     override fun apply() {
@@ -184,6 +192,7 @@ class PiSettingsConfigurable : Configurable {
         state.conversationFontSize = fontSizeValue()
         state.notifyOnAgentEnd = notifyAgentEndCheck?.isSelected == true
         state.openModifiedFiles = openModifiedFilesCheck?.isSelected == true
+        state.logLevel = (logLevelCombo?.selectedItem as? String) ?: "info"
         PiSettings.getInstance().notifyChanged()
     }
 
@@ -201,6 +210,7 @@ class PiSettingsConfigurable : Configurable {
         )
         notifyAgentEndCheck?.isSelected = settings.notifyOnAgentEnd
         openModifiedFilesCheck?.isSelected = settings.openModifiedFiles
+        logLevelCombo?.selectedItem = PiLog.Level.fromLabel(settings.logLevel).label
     }
 
     private fun fontSizeValue(): Int {

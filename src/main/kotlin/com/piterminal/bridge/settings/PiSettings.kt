@@ -34,6 +34,7 @@ class PiSettings : PersistentStateComponent<PiSettings.State> {
         var sendWithCtrlEnter: Boolean = false
         var notifyOnAgentEnd: Boolean = false
         var openModifiedFiles: Boolean = false
+        var logLevel: String = "info"
     }
 
     private var myState = State()
