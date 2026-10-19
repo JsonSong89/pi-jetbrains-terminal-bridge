@@ -18,7 +18,7 @@ object PiBridgeInstaller {
 
     private val logger = Logger.getInstance(PiBridgeInstaller::class.java)
 
-    private const val VERSION = 6
+    private const val VERSION = 7
 
     // language=TypeScript
     private val SOURCE = """
@@ -77,7 +77,7 @@ function refreshSessionId(ctx) {
 
 function reportSessionChanged(ctx) {
   refreshSessionId(ctx);
-  if (sessionId) send("session_changed", { sessionId });
+  if (sessionId) send("session_changed", { sessionId, extensionVersion: VERSION });
 }
 
 export default function (pi) {
@@ -182,7 +182,11 @@ export default function (pi) {
       if (!enabled()) return;
       try {
         const parsed = parseMessageArgs(args);
-        if (!parsed) return;
+        if (!parsed) {
+          try { ctx.ui.notify("bridge-fork: bad arguments", "warn"); } catch (_e) {}
+          return;
+        }
+        try { ctx.ui.notify(`bridge-fork: forking at panel message #${parsed.index}`, "info"); } catch (_e) {}
         const entry = findUserMessage(ctx, parsed.index, parsed.text);
         if (!entry) {
           try { ctx.ui.notify("bridge-fork: matching message not found", "warn"); } catch (_e) {}
@@ -210,7 +214,10 @@ export default function (pi) {
       if (!enabled()) return;
       try {
         const parsed = parseMessageArgs(args);
-        if (!parsed) return;
+        if (!parsed) {
+          try { ctx.ui.notify("bridge-rewind: bad arguments", "warn"); } catch (_e) {}
+          return;
+        }
         const entry = findUserMessage(ctx, parsed.index, parsed.text);
         if (!entry) {
           try { ctx.ui.notify("bridge-rewind: matching message not found", "warn"); } catch (_e) {}

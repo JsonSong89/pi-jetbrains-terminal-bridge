@@ -388,12 +388,22 @@ class PiConversationService(private val project: Project) {
     // ---- Bridge event handlers (called from PiBridgeServer threads) ----
 
     /** /new, /fork, /clone or /resume switched the session inside the terminal. */
-    fun onBridgeSessionChanged(tabKey: String, sessionId: String) {
+    fun onBridgeSessionChanged(tabKey: String, sessionId: String, extensionVersion: String? = null) {
         val conversation = get(tabKey) ?: run {
             logger.info("Bridge session_changed for unknown tab $tabKey; dropping")
             return
         }
-        if (conversation.piSessionId == sessionId) return
+        if (conversation.piSessionId == sessionId) {
+            // Id already matches (typical launch: we passed --session-id and pi
+            // echoed it). Still dispatch a pending fork command if one waits —
+            // the id check above would otherwise swallow it and the session
+            // would stay on the full --fork copy.
+            if (pendingForkCommands.containsKey(tabKey)) {
+                logger.info("Bridge session_changed matched pre-set id for $tabKey; dispatching pending fork")
+                schedulePendingForkCommand(tabKey)
+            }
+            return
+        }
         val previousSessionId = conversation.piSessionId
         val firstBind = synchronized(boundTabs) {
             if (tabKey !in boundTabs) {
@@ -407,7 +417,7 @@ class PiConversationService(private val project: Project) {
             // create a spurious entry on every launch.
             conversation.piSessionId = sessionId
             persist()
-            logger.info("Bound conversation ${conversation.id} to pi session $sessionId")
+            logger.info("Bound conversation ${conversation.id} to pi session $sessionId (extension v$extensionVersion)")
             notifyListeners(ChangeEvent(ChangeKind.STRUCTURE, conversation.id))
             schedulePendingForkCommand(conversation.id)
             return
@@ -419,7 +429,7 @@ class PiConversationService(private val project: Project) {
             // copy was a transient transport, not a conversation worth keeping.
             conversation.piSessionId = sessionId
             persist()
-            logger.info("Forked conversation ${conversation.id} to pi session $sessionId")
+            logger.info("Fork completed: conversation ${conversation.id} rebound to pi session $sessionId")
             notifyListeners(ChangeEvent(ChangeKind.STRUCTURE, conversation.id))
             return
         }
@@ -592,14 +602,20 @@ class PiConversationService(private val project: Project) {
             val fullCommand = "/bridge-fork ${command.messageIndex} ${command.encodedText}"
             var sentSessionId: String? = null
             var attempts = 0
+            logger.info("Fork watchdog armed for $conversationId: index=${command.messageIndex}")
             while (attempts < 20 && !project.isDisposed) {
                 attempts++
-                if (!terminal().isAlive(conversationId)) return@executeOnPooledThread
+                if (!terminal().isAlive(conversationId)) {
+                    logger.info("Fork watchdog: terminal gone for $conversationId after $attempts attempts")
+                    return@executeOnPooledThread
+                }
                 val bound = get(conversationId)?.piSessionId
                 if (sentSessionId != null && bound != null && bound != sentSessionId) {
                     // Rebind observed: the fork completed.
+                    logger.info("Fork watchdog: rebind observed for $conversationId ($sentSessionId -> $bound) after $attempts attempts")
                     return@executeOnPooledThread
                 }
+                logger.info("Fork watchdog: sending /bridge-fork attempt $attempts for $conversationId (bound=$bound)")
                 terminal().sendText(conversationId, fullCommand)
                 sentSessionId = bound ?: sentSessionId
                 try {
@@ -609,6 +625,7 @@ class PiConversationService(private val project: Project) {
                     return@executeOnPooledThread
                 }
             }
+            logger.warn("Fork watchdog: giving up for $conversationId after $attempts attempts — session stays on the full copy")
         }
     }
 

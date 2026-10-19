@@ -153,7 +153,7 @@ class PiBridgeServer(private val project: Project) : Disposable {
         // Orphan routing: handlers drop unknown tabKeys silently.
         when (type) {
             "session_changed" -> str(data, "sessionId")?.let {
-                service.onBridgeSessionChanged(tabKey, it)
+                service.onBridgeSessionChanged(tabKey, it, str(data, "extensionVersion"))
             }
             "session_stopped" -> service.onBridgeSessionStopped(tabKey)
             "agent_state" -> str(data, "state")?.let { service.onBridgeAgentState(tabKey, it, str(data, "stopReason")) }
