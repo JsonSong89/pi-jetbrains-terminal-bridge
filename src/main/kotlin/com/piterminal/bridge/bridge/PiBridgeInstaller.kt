@@ -186,7 +186,7 @@ export default function (pi) {
           try { ctx.ui.notify("bridge-fork: bad arguments", "warn"); } catch (_e) {}
           return;
         }
-        try { ctx.ui.notify(`bridge-fork: forking at panel message #${parsed.index}`, "info"); } catch (_e) {}
+        try { ctx.ui.notify(`bridge-fork: forking at panel message #` + parsed.index, "info"); } catch (_e) {}
         const entry = findUserMessage(ctx, parsed.index, parsed.text);
         if (!entry) {
           try { ctx.ui.notify("bridge-fork: matching message not found", "warn"); } catch (_e) {}
