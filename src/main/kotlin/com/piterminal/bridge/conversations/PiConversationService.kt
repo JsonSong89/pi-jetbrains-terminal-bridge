@@ -168,8 +168,10 @@ class PiConversationService(private val project: Project) {
             title = uniqueForkTitle(source.title),
             tabName = source.tabName,
             piSessionId = UUID.randomUUID().toString(),
-            messages = source.messages.subList(0, messageIndex).toMutableList(),
-            draft = forkMessage.text
+            // Keep history up to and including the forked message; nothing
+            // after it, and nothing pre-filled — fork continues from that
+            // point, the user types the next question.
+            messages = source.messages.subList(0, messageIndex + 1).toMutableList()
         )
         synchronized(conversations) {
             conversations[conversation.id] = conversation

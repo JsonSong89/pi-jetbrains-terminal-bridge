@@ -75,12 +75,15 @@ command works exactly as on the command line:
   - `/new` after wrapping up — the previous session is archived in the panel, still resumable later
 
 Each user-message card in the panel also carries a **Fork** button (branch icon,
-next to Copy and Delete). It matches pi's `/fork` semantics exactly: the new
-conversation `<original>-fork` gets the history **before** that message, and the
-message text returns to the panel's input so you can edit and re-send it — the
-original conversation stays untouched. Under the hood the plugin launches pi
-with `--fork <session>` and the bridge extension's `/bridge-fork` command
-truncates the copy at the selected message.
+next to Rewind, Copy and Delete): it creates a new conversation `<original>-fork`
+that keeps the history **up to and including** that message and its reply —
+everything after it is dropped — with an empty input, so you continue from that
+exact point in a fresh session. The original conversation stays untouched.
+Under the hood the plugin launches pi with `--fork <session>` and the bridge
+extension's `/bridge-fork` command (fork at the turn's leaf entry) trims the
+copy. Rewind is the in-session counterpart: same trim point, but the trimmed
+message's text is pre-filled in the panel input for editing, and the session
+stays the same.
 
 The **Rewind** button (undo icon, left of Fork) is the in-session variant for
 pi's `/tree`: it calls `navigateTree` in the same session — no new session, no

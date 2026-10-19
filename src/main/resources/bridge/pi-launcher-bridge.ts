@@ -135,21 +135,29 @@ export default function (pi) {
       users.push({ entry: e, text: t });
     }
     const byIndex = Number.isInteger(index) && index >= 0 && index < users.length ? users[index] : undefined;
-    if (byIndex && byIndex.text === text) return byIndex.entry;
+    if (byIndex && byIndex.text === text) return byIndex;
     for (let i = users.length - 1; i >= 0; i--) {
-      if (users[i].text === text) return users[i].entry;
+      if (users[i].text === text) return users[i];
     }
     return undefined;
   }
 
-  function parseMessageArgs(args) {
-    const parts = String(args || "").trim().split(/\s+/);
-    if (parts.length < 2) return undefined;
-    const index = /^\d+$/.test(parts[0]) ? parseInt(parts[0], 10) : undefined;
-    let text = "";
-    try { text = Buffer.from(parts[1], "base64").toString("utf8"); } catch (_e) {}
-    if (!text) return undefined;
-    return { index, text };
+  // Fork semantics (matches the IDE panel's Fork button): keep history up to
+  // and INCLUDING the selected user message and its AI reply; drop everything
+  // after it; nothing lands in the editor. Implemented as fork(position:"at")
+  // with the leaf set to the AI reply of that turn (or the message itself
+  // when no reply followed).
+  function leafEntryForTurn(ctx, userEntry) {
+    const branch = ctx.sessionManager.getBranch();
+    const at = branch.indexOf(userEntry);
+    if (at < 0) return userEntry;
+    for (let i = at + 1; i < branch.length; i++) {
+      const e = branch[i];
+      if (!e || e.type !== "message" || !e.message) continue;
+      if (e.message.role === "user") break; // next turn started — no reply for this one
+      if (e.message.role === "assistant") return e;
+    }
+    return userEntry;
   }
 
   pi.registerCommand("bridge-fork", {
@@ -162,14 +170,15 @@ export default function (pi) {
           try { ctx.ui.notify("bridge-fork: bad arguments", "warn"); } catch (_e) {}
           return;
         }
-        try { ctx.ui.notify(`bridge-fork: forking at panel message #` + parsed.index, "info"); } catch (_e) {}
-        const entry = findUserMessage(ctx, parsed.index, parsed.text);
-        if (!entry) {
+        const found = findUserMessage(ctx, parsed.index, parsed.text);
+        if (!found) {
           try { ctx.ui.notify("bridge-fork: matching message not found", "warn"); } catch (_e) {}
           return;
         }
-        await ctx.fork(entry.id);
-        try { ctx.ui.notify("bridge-fork: forked at the selected message", "info"); } catch (_e) {}
+        const leaf = leafEntryForTurn(ctx, found.entry);
+        try { ctx.ui.notify("bridge-fork: forking at panel message #" + parsed.index, "info"); } catch (_e) {}
+        await ctx.fork(leaf.id, { position: "at" });
+        try { ctx.ui.notify("bridge-fork: forked — kept history up to this message, nothing after it", "info"); } catch (_e) {}
       } catch (_e) {
         // best-effort: never break pi
       }

@@ -28,7 +28,7 @@ object PiBridgeInstaller {
 
     private val logger = Logger.getInstance(PiBridgeInstaller::class.java)
 
-    private const val VERSION = 6
+    private const val VERSION = 7
 
     private const val RESOURCE_PATH = "/bridge/pi-launcher-bridge.ts"
 
