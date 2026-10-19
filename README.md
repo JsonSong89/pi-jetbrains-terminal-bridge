@@ -84,9 +84,9 @@ extension's `/bridge-fork` command (fork at the turn's leaf entry) trims the
 copy. The endpoint is the last entry before the next user message, including
 all tool calls/results and the final reply, not just the first assistant entry.
 The command is sent once after the first bridge bind, with a short startup
-settling delay. This is a one-shot handoff, not a retrying watchdog: it never
-repeatedly writes to the TUI input. If delivery fails, the log reports it and
-the full copy remains available for recovery.
+settling delay. Then IDEA checks the bound session id every 1.5 seconds, at
+most six times; a changed id confirms the fork, otherwise it logs a timeout.
+Checks are read-only and never rewrite the TUI input.
 This panel action deliberately differs from native `/fork`'s default edit-before
 behavior.
 

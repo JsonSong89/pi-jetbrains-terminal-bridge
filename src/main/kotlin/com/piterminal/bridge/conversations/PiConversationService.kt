@@ -590,31 +590,32 @@ class PiConversationService(private val project: Project) {
         return true
     }
 
-    /** Once pi boots (first bind), send the pending fork command once. */
+    /** Once pi boots (first bind), send the fork command once and observe its result. */
     private fun schedulePendingForkCommand(conversationId: String) {
         val command = pendingForkCommands.remove(conversationId) ?: return
         val expectedSessionId = get(conversationId)?.piSessionId
         ApplicationManager.getApplication().executeOnPooledThread {
-            // This is deliberately a one-shot handoff, not a watchdog. The
-            // command is sent through the TUI only after startup has settled;
-            // repeating it would visibly flash the input and can concatenate
-            // commands in pi's editor. A missed handoff is reported instead
-            // of continuously mutating the user's input.
+            // The initial delay is only to let the TUI finish startup; it is
+            // not waiting for pi to fork. Send exactly once, then poll only
+            // the bridge-reported session id. Never retype the command.
             logger.info("Scheduling one-shot /bridge-fork for $conversationId: index=${command.messageIndex}")
             try {
-                Thread.sleep(3000)
+                Thread.sleep(FORK_STARTUP_SETTLE_MS)
             } catch (_: InterruptedException) {
                 Thread.currentThread().interrupt()
                 logger.warn("Fork handoff interrupted for $conversationId")
+                clearForkInFlight(conversationId)
                 return@executeOnPooledThread
             }
             if (project.isDisposed || !terminal().isAlive(conversationId)) {
                 logger.warn("Fork handoff skipped: terminal is gone for $conversationId")
+                clearForkInFlight(conversationId)
                 return@executeOnPooledThread
             }
             val currentSessionId = get(conversationId)?.piSessionId
             if (expectedSessionId != null && currentSessionId != expectedSessionId) {
                 logger.warn("Fork handoff skipped: session changed before command delivery for $conversationId")
+                clearForkInFlight(conversationId)
                 return@executeOnPooledThread
             }
             logger.info("Sending one-shot /bridge-fork for $conversationId (session=$currentSessionId)")
@@ -622,7 +623,35 @@ class PiConversationService(private val project: Project) {
                 conversationId,
                 "/bridge-fork ${command.messageIndex} ${command.encodedText}"
             )
+
+            repeat(FORK_RESULT_CHECKS) { attempt ->
+                try {
+                    Thread.sleep(FORK_RESULT_CHECK_INTERVAL_MS)
+                } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    logger.warn("Fork result check interrupted for $conversationId")
+                    return@executeOnPooledThread
+                }
+                if (project.isDisposed) return@executeOnPooledThread
+                if (!terminal().isAlive(conversationId)) {
+                    logger.warn("Fork result check: terminal closed for $conversationId")
+                    clearForkInFlight(conversationId)
+                    return@executeOnPooledThread
+                }
+                val observedSessionId = get(conversationId)?.piSessionId
+                if (observedSessionId != null && observedSessionId != expectedSessionId) {
+                    logger.info("Fork confirmed for $conversationId: $expectedSessionId -> $observedSessionId")
+                    return@executeOnPooledThread
+                }
+                logger.info("Fork result check ${attempt + 1}/$FORK_RESULT_CHECKS: awaiting session_changed for $conversationId")
+            }
+            logger.warn("Fork failed or unconfirmed for $conversationId after $FORK_RESULT_CHECKS checks; session remains on the full copy")
+            clearForkInFlight(conversationId)
         }
+    }
+
+    private fun clearForkInFlight(conversationId: String) {
+        synchronized(forkingIds) { forkingIds.remove(conversationId) }
     }
 
     private fun base64(text: String): String =
@@ -723,6 +752,9 @@ class PiConversationService(private val project: Project) {
         const val ARCHIVED_SUFFIX = " (archived)"
         const val WORKSPACE_START = "<workspace-open-files>"
         const val WORKSPACE_END = "</workspace-open-files>"
+        private const val FORK_STARTUP_SETTLE_MS = 3_000L
+        private const val FORK_RESULT_CHECK_INTERVAL_MS = 1_500L
+        private const val FORK_RESULT_CHECKS = 6
         private val TITLE_TIME_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("MM-dd HH:mm")
         private val WORKSPACE_BLOCK_REGEX = Regex(
             """$WORKSPACE_START[\s\S]*?$WORKSPACE_END"""
