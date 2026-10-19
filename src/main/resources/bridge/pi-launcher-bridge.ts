@@ -179,8 +179,8 @@ export default function (pi) {
         try { ctx.ui.notify("bridge-fork: forking at panel message #" + parsed.index, "info"); } catch (_e) {}
         await ctx.fork(leaf.id, { position: "at" });
         try { ctx.ui.notify("bridge-fork: forked — kept history up to this message, nothing after it", "info"); } catch (_e) {}
-      } catch (_e) {
-        // best-effort: never break pi
+      } catch (err) {
+        try { ctx.ui.notify("bridge-fork failed: " + (err && err.message ? err.message : String(err)), "error"); } catch (_e) {}
       }
     },
   });
@@ -203,11 +203,12 @@ export default function (pi) {
           try { ctx.ui.notify("bridge-rewind: bad arguments", "warn"); } catch (_e) {}
           return;
         }
-        const entry = findUserMessage(ctx, parsed.index, parsed.text);
-        if (!entry) {
+        const found = findUserMessage(ctx, parsed.index, parsed.text);
+        if (!found) {
           try { ctx.ui.notify("bridge-rewind: matching message not found", "warn"); } catch (_e) {}
           return;
         }
+        const entry = found.entry;
         // parentId is the "continue after it" point; skip the first-ever
         // message (no parent to land on, branch would already be empty).
         if (!entry.parentId) {
@@ -215,8 +216,8 @@ export default function (pi) {
           return;
         }
         await ctx.navigateTree(entry.parentId);
-      } catch (_e) {
-        // best-effort: never break pi
+      } catch (err) {
+        try { ctx.ui.notify("bridge-rewind failed: " + (err && err.message ? err.message : String(err)), "error"); } catch (_e) {}
       }
     },
   });

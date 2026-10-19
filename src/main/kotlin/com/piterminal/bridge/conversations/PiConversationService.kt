@@ -605,6 +605,15 @@ class PiConversationService(private val project: Project) {
             var sentSessionId: String? = null
             var attempts = 0
             logger.info("Fork watchdog armed for $conversationId: index=${command.messageIndex}")
+            // Give the TUI time to finish init past session_start — a submit
+            // during startup is held in the editor (pi's handleStartupSubmit)
+            // and never executes.
+            try {
+                Thread.sleep(3000)
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+                return@executeOnPooledThread
+            }
             while (attempts < 20 && !project.isDisposed) {
                 attempts++
                 if (!terminal().isAlive(conversationId)) {
@@ -617,6 +626,10 @@ class PiConversationService(private val project: Project) {
                     logger.info("Fork watchdog: rebind observed for $conversationId ($sentSessionId -> $bound) after $attempts attempts")
                     return@executeOnPooledThread
                 }
+                // Clear the TUI editor first: a held (unexecuted) previous
+                // command would otherwise be concatenated onto this paste and
+                // corrupt the base64 arguments.
+                terminal().sendText(conversationId, "\u0003")
                 logger.info("Fork watchdog: sending /bridge-fork attempt $attempts for $conversationId (bound=$bound)")
                 terminal().sendText(conversationId, fullCommand)
                 sentSessionId = bound ?: sentSessionId

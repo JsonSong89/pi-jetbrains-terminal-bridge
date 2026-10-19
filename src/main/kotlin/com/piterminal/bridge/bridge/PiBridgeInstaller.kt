@@ -28,7 +28,7 @@ object PiBridgeInstaller {
 
     private val logger = Logger.getInstance(PiBridgeInstaller::class.java)
 
-    private const val VERSION = 7
+    private const val VERSION = 6
 
     private const val RESOURCE_PATH = "/bridge/pi-launcher-bridge.ts"
 
@@ -56,8 +56,10 @@ object PiBridgeInstaller {
     }
 
     private fun isCurrent(path: Path): Boolean = try {
-        val text = Files.readString(path)
-        text.contains("const VERSION = $VERSION;")
+        // Compare full content, not the version constant: the version stays
+        // at 6 until the first tagged release, so any resource change must
+        // still rewrite the installed file.
+        Files.readString(path) == source
     } catch (_: Exception) {
         false
     }
