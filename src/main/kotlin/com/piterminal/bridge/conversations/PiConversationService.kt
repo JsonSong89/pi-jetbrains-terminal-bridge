@@ -132,13 +132,13 @@ class PiConversationService(private val project: Project) {
     }
 
     /**
-     * Forks [id] at user message [messageIndex] using pi's fork semantics:
-     * the new conversation "<source>-fork" carries the history BEFORE that
-     * message, and the message text is pre-filled in the draft so the user
-     * can edit and re-send it (mirroring pi's /fork putting the text back in
-     * the editor). The new terminal starts from a full --fork copy of the
-     * source session; once the bridge reports the first bind, the plugin sends
-     * the extension's /bridge-fork command to truncate at that message.
+     * Forks [id] at user message [messageIndex]: the new conversation
+     * "<source>-fork" keeps history through that message and its complete
+     * reply, drops everything after it, and leaves the new draft empty. The
+     * new terminal starts from a full `--fork` copy; after its first bridge
+     * bind, one delayed `/bridge-fork` command trims that copy. The handoff
+     * is intentionally one-shot; it never retries or writes repeatedly into
+     * the TUI input.
      */
     fun forkConversation(id: String, messageIndex: Int): PiConversation? {
         val source = get(id) ?: return null
@@ -590,49 +590,38 @@ class PiConversationService(private val project: Project) {
         return true
     }
 
-    /** Once pi booted (first bind), tell the extension to fork at the message. */
+    /** Once pi boots (first bind), send the pending fork command once. */
     private fun schedulePendingForkCommand(conversationId: String) {
         val command = pendingForkCommands.remove(conversationId) ?: return
+        val expectedSessionId = get(conversationId)?.piSessionId
         ApplicationManager.getApplication().executeOnPooledThread {
-            // Retry until the session rebind (fork happened) or the terminal
-            // is gone. Inclusive forks retain the selected message, so a retry
-            // is NOT inherently a no-op; observe the session id between sends.
-            val fullCommand = "/bridge-fork ${command.messageIndex} ${command.encodedText}"
-            var sentSessionId: String? = null
-            var attempts = 0
-            logger.info("Fork watchdog armed for $conversationId: index=${command.messageIndex}")
-            // Give the TUI time to finish init past session_start — a submit
-            // during startup is held in the editor (pi's handleStartupSubmit)
-            // and never executes.
+            // This is deliberately a one-shot handoff, not a watchdog. The
+            // command is sent through the TUI only after startup has settled;
+            // repeating it would visibly flash the input and can concatenate
+            // commands in pi's editor. A missed handoff is reported instead
+            // of continuously mutating the user's input.
+            logger.info("Scheduling one-shot /bridge-fork for $conversationId: index=${command.messageIndex}")
             try {
                 Thread.sleep(3000)
             } catch (_: InterruptedException) {
                 Thread.currentThread().interrupt()
+                logger.warn("Fork handoff interrupted for $conversationId")
                 return@executeOnPooledThread
             }
-            while (attempts < 20 && !project.isDisposed) {
-                attempts++
-                if (!terminal().isAlive(conversationId)) {
-                    logger.info("Fork watchdog: terminal gone for $conversationId after $attempts attempts")
-                    return@executeOnPooledThread
-                }
-                val bound = get(conversationId)?.piSessionId
-                if (sentSessionId != null && bound != null && bound != sentSessionId) {
-                    // Rebind observed: the fork completed.
-                    logger.info("Fork watchdog: rebind observed for $conversationId ($sentSessionId -> $bound) after $attempts attempts")
-                    return@executeOnPooledThread
-                }
-                logger.info("Fork watchdog: sending /bridge-fork attempt $attempts for $conversationId (bound=$bound)")
-                terminal().sendText(conversationId, fullCommand)
-                sentSessionId = bound ?: sentSessionId
-                try {
-                    Thread.sleep(1500)
-                } catch (_: InterruptedException) {
-                    Thread.currentThread().interrupt()
-                    return@executeOnPooledThread
-                }
+            if (project.isDisposed || !terminal().isAlive(conversationId)) {
+                logger.warn("Fork handoff skipped: terminal is gone for $conversationId")
+                return@executeOnPooledThread
             }
-            logger.warn("Fork watchdog: giving up for $conversationId after $attempts attempts — session stays on the full copy")
+            val currentSessionId = get(conversationId)?.piSessionId
+            if (expectedSessionId != null && currentSessionId != expectedSessionId) {
+                logger.warn("Fork handoff skipped: session changed before command delivery for $conversationId")
+                return@executeOnPooledThread
+            }
+            logger.info("Sending one-shot /bridge-fork for $conversationId (session=$currentSessionId)")
+            terminal().sendText(
+                conversationId,
+                "/bridge-fork ${command.messageIndex} ${command.encodedText}"
+            )
         }
     }
 

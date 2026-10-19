@@ -83,6 +83,10 @@ Under the hood the plugin launches pi with `--fork <session>` and the bridge
 extension's `/bridge-fork` command (fork at the turn's leaf entry) trims the
 copy. The endpoint is the last entry before the next user message, including
 all tool calls/results and the final reply, not just the first assistant entry.
+The command is sent once after the first bridge bind, with a short startup
+settling delay. This is a one-shot handoff, not a retrying watchdog: it never
+repeatedly writes to the TUI input. If delivery fails, the log reports it and
+the full copy remains available for recovery.
 This panel action deliberately differs from native `/fork`'s default edit-before
 behavior.
 
