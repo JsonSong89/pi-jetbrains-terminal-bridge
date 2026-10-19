@@ -63,8 +63,11 @@ class PiConversationService(private val project: Project) {
     private val models = mutableMapOf<String, String>()
     /** Conversation ids with an in-flight message fork (no archive on rebind). */
     private val forkingIds = mutableSetOf<String>()
-    /** Conversation id -> base64 message text awaiting the /bridge-fork command. */
-    private val pendingForkCommands = java.util.concurrent.ConcurrentHashMap<String, String>()
+    /** In-flight /bridge-fork command: message text (base64) + panel index. */
+    private data class ForkCommand(val encodedText: String, val messageIndex: Int)
+
+    /** Conversation id -> command awaiting the terminal's first session bind. */
+    private val pendingForkCommands = java.util.concurrent.ConcurrentHashMap<String, ForkCommand>()
 
     init {
         loadFromStore()
@@ -174,8 +177,10 @@ class PiConversationService(private val project: Project) {
         }
         persist()
         synchronized(forkingIds) { forkingIds.add(conversation.id) }
-        pendingForkCommands[conversation.id] =
-            java.util.Base64.getEncoder().encodeToString(forkMessage.text.toByteArray(Charsets.UTF_8))
+        pendingForkCommands[conversation.id] = ForkCommand(
+            base64(forkMessage.text),
+            messageIndex
+        )
         terminal().launch(
             conversation.id,
             conversation.tabName,
@@ -566,8 +571,8 @@ class PiConversationService(private val project: Project) {
         conversation.messages.subList(messageIndex, conversation.messages.size).clear()
         conversation.draft = text
         persist()
-        val encoded = java.util.Base64.getEncoder().encodeToString(text.toByteArray(Charsets.UTF_8))
-        terminal().sendText(conversation.id, "/bridge-rewind $encoded")
+        val encoded = base64(text)
+        terminal().sendText(conversation.id, "/bridge-rewind $messageIndex $encoded")
         notifyListeners(ChangeEvent(ChangeKind.STRUCTURE, conversation.id))
         notifyListeners(ChangeEvent(ChangeKind.DRAFT_APPENDED, conversation.id))
         return true
@@ -575,18 +580,40 @@ class PiConversationService(private val project: Project) {
 
     /** Once pi booted (first bind), tell the extension to fork at the message. */
     private fun schedulePendingForkCommand(conversationId: String) {
-        val encoded = pendingForkCommands.remove(conversationId) ?: return
+        val command = pendingForkCommands.remove(conversationId) ?: return
         ApplicationManager.getApplication().executeOnPooledThread {
-            try {
-                // Give the TUI a moment to finish init after session_start.
-                Thread.sleep(1500)
-            } catch (_: InterruptedException) {
-                Thread.currentThread().interrupt()
-                return@executeOnPooledThread
+            // Watchdog: the first send may race the TUI becoming ready (the
+            // command would be swallowed) — retry until the session rebind
+            // (fork happened) or the terminal is gone. A repeat command after
+            // a successful fork is a no-op: the entry no longer matches on
+            // the new active branch... unless the text matches an earlier
+            // message, so also stop once the session id differs from the
+            // one bound at first-send time.
+            val fullCommand = "/bridge-fork ${command.messageIndex} ${command.encodedText}"
+            var sentSessionId: String? = null
+            var attempts = 0
+            while (attempts < 20 && !project.isDisposed) {
+                attempts++
+                if (!terminal().isAlive(conversationId)) return@executeOnPooledThread
+                val bound = get(conversationId)?.piSessionId
+                if (sentSessionId != null && bound != null && bound != sentSessionId) {
+                    // Rebind observed: the fork completed.
+                    return@executeOnPooledThread
+                }
+                terminal().sendText(conversationId, fullCommand)
+                sentSessionId = bound ?: sentSessionId
+                try {
+                    Thread.sleep(1500)
+                } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    return@executeOnPooledThread
+                }
             }
-            terminal().sendText(conversationId, "/bridge-fork $encoded")
         }
     }
+
+    private fun base64(text: String): String =
+        java.util.Base64.getEncoder().encodeToString(text.toByteArray(Charsets.UTF_8))
 
     private fun loadFromStore() {
         val stored = store().snapshot()

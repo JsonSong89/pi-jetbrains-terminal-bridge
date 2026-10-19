@@ -18,7 +18,7 @@ object PiBridgeInstaller {
 
     private val logger = Logger.getInstance(PiBridgeInstaller::class.java)
 
-    private const val VERSION = 5
+    private const val VERSION = 6
 
     // language=TypeScript
     private val SOURCE = """
@@ -138,29 +138,58 @@ export default function (pi) {
   // IDE-side "Fork" button on a message card: fork this session at that
   // message (pi's /fork semantics — history before the message, the message
   // text returns to the IDE panel's draft for editing). The IDE launches pi
-  // with --fork <source> (full copy), then sends this command with the
-  // message text base64-encoded. We locate the matching user entry on the
-  // active branch (newest first) and fork before it; the resulting
-  // session_changed report rebinds the IDE conversation to the new session.
+  // with --fork <source> (full copy), then sends this command once the first
+  // bind is reported; the command carries the panel index + message text and
+  // the extension forks before that entry. The resulting session_changed
+  // report rebinds the IDE conversation to the new session.
+  // Shared lookup for bridge-fork / bridge-rewind: user messages on the
+  // active branch, oldest first. The IDE panel's message list maps 1:1 onto
+  // this order when messages were sent through the panel, so the command
+  // carries the panel index plus the message text (both base64-safe): match
+  // index AND text first; fall back to newest-first text matching when the
+  // panel index drifted (e.g. messages typed directly in the TUI).
+  function findUserMessage(ctx, index, text) {
+    const users = [];
+    const branch = ctx.sessionManager.getBranch();
+    for (let i = 0; i < branch.length; i++) {
+      const e = branch[i];
+      if (!e || e.type !== "message" || !e.message || e.message.role !== "user") continue;
+      const c = e.message.content;
+      const t = typeof c === "string" ? c : Array.isArray(c) ? c.filter(x => x && x.type === "text").map(x => x.text).join("") : "";
+      users.push({ entry: e, text: t });
+    }
+    const byIndex = Number.isInteger(index) && index >= 0 && index < users.length ? users[index] : undefined;
+    if (byIndex && byIndex.text === text) return byIndex.entry;
+    for (let i = users.length - 1; i >= 0; i--) {
+      if (users[i].text === text) return users[i].entry;
+    }
+    return undefined;
+  }
+
+  function parseMessageArgs(args) {
+    const parts = String(args || "").trim().split(/\s+/);
+    if (parts.length < 2) return undefined;
+    const index = /^\d+$/.test(parts[0]) ? parseInt(parts[0], 10) : undefined;
+    let text = "";
+    try { text = Buffer.from(parts[1], "base64").toString("utf8"); } catch (_e) {}
+    if (!text) return undefined;
+    return { index, text };
+  }
+
   pi.registerCommand("bridge-fork", {
     description: "Internal: fork the current session at a message (Pi Terminal Bridge)",
     handler: async (args, ctx) => {
       if (!enabled()) return;
       try {
-        const text = Buffer.from(String(args || "").trim(), "base64").toString("utf8");
-        if (!text) return;
-        const branch = ctx.sessionManager.getBranch();
-        for (let i = branch.length - 1; i >= 0; i--) {
-          const e = branch[i];
-          if (!e || e.type !== "message" || !e.message || e.message.role !== "user") continue;
-          const c = e.message.content;
-          const t = typeof c === "string" ? c : Array.isArray(c) ? c.filter(x => x && x.type === "text").map(x => x.text).join("") : "";
-          if (t === text) {
-            await ctx.fork(e.id);
-            return;
-          }
+        const parsed = parseMessageArgs(args);
+        if (!parsed) return;
+        const entry = findUserMessage(ctx, parsed.index, parsed.text);
+        if (!entry) {
+          try { ctx.ui.notify("bridge-fork: matching message not found", "warn"); } catch (_e) {}
+          return;
         }
-        try { ctx.ui.notify("bridge-fork: matching message not found", "warn"); } catch (_e) {}
+        await ctx.fork(entry.id);
+        try { ctx.ui.notify("bridge-fork: forked at the selected message", "info"); } catch (_e) {}
       } catch (_e) {
         // best-effort: never break pi
       }
@@ -180,25 +209,20 @@ export default function (pi) {
     handler: async (args, ctx) => {
       if (!enabled()) return;
       try {
-        const text = Buffer.from(String(args || "").trim(), "base64").toString("utf8");
-        if (!text) return;
-        const branch = ctx.sessionManager.getBranch();
-        for (let i = branch.length - 1; i >= 0; i--) {
-          const e = branch[i];
-          if (!e || e.type !== "message" || !e.message || e.message.role !== "user") continue;
-          const c = e.message.content;
-          const t = typeof c === "string" ? c : Array.isArray(c) ? c.filter(x => x && x.type === "text").map(x => x.text).join("") : "";
-          if (t !== text) continue;
-          // parentId is the "continue after it" point; skip the first-ever
-          // message (no parent to land on, branch would already be empty).
-          if (!e.parentId) {
-            try { ctx.ui.notify("bridge-rewind: message is the first entry; nothing before it to rewind to", "warn"); } catch (_e) {}
-            return;
-          }
-          await ctx.navigateTree(e.parentId);
+        const parsed = parseMessageArgs(args);
+        if (!parsed) return;
+        const entry = findUserMessage(ctx, parsed.index, parsed.text);
+        if (!entry) {
+          try { ctx.ui.notify("bridge-rewind: matching message not found", "warn"); } catch (_e) {}
           return;
         }
-        try { ctx.ui.notify("bridge-rewind: matching message not found", "warn"); } catch (_e) {}
+        // parentId is the "continue after it" point; skip the first-ever
+        // message (no parent to land on, branch would already be empty).
+        if (!entry.parentId) {
+          try { ctx.ui.notify("bridge-rewind: message is the first entry; nothing before it to rewind to", "warn"); } catch (_e) {}
+          return;
+        }
+        await ctx.navigateTree(entry.parentId);
       } catch (_e) {
         // best-effort: never break pi
       }
