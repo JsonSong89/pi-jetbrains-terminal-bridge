@@ -111,13 +111,24 @@ export default function (pi) {
       for (const p of paths) send("file_modified", { path: String(p) });
     } catch (_e) {}
   });
-  // IDE-side "Fork" button on a message card: fork this session at that
-  // message (pi's /fork semantics — history before the message, the message
-  // text returns to the IDE panel's draft for editing). The IDE launches pi
-  // with --fork <source> (full copy), then sends this command once the first
-  // bind is reported; the command carries the panel index + message text and
-  // the extension forks before that entry. The resulting session_changed
-  // report rebinds the IDE conversation to the new session.
+  // Fork creates a separate session through the end of the selected turn.
+  // Rewind navigates the existing session to BEFORE the selected user message.
+  // Only argument decoding and message lookup are shared between the commands.
+  function parseMessageArgs(args) {
+    const parts = String(args || "").trim().split(/\s+/);
+    if (parts.length !== 2 || !/^\d+$/.test(parts[0])) return undefined;
+    const index = Number(parts[0]);
+    if (!Number.isSafeInteger(index)) return undefined;
+    const encoded = parts[1];
+    // Buffer.from is permissive: reject corrupted/concatenated commands rather
+    // than silently decoding them into a different message.
+    if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(encoded)) return undefined;
+    const bytes = Buffer.from(encoded, "base64");
+    const text = bytes.toString("utf8");
+    if (!text || bytes.toString("base64") !== encoded || !Buffer.from(text, "utf8").equals(bytes)) return undefined;
+    return { index, text };
+  }
+
   // Shared lookup for bridge-fork / bridge-rewind: user messages on the
   // active branch, oldest first. The IDE panel's message list maps 1:1 onto
   // this order when messages were sent through the panel, so the command
@@ -149,15 +160,17 @@ export default function (pi) {
   // when no reply followed).
   function leafEntryForTurn(ctx, userEntry) {
     const branch = ctx.sessionManager.getBranch();
-    const at = branch.indexOf(userEntry);
-    if (at < 0) return userEntry;
+    const at = branch.findIndex(e => e.id === userEntry.id);
+    if (at < 0) throw new Error("Selected message is no longer on the active branch");
+    let leaf = userEntry;
     for (let i = at + 1; i < branch.length; i++) {
       const e = branch[i];
-      if (!e || e.type !== "message" || !e.message) continue;
-      if (e.message.role === "user") break; // next turn started — no reply for this one
-      if (e.message.role === "assistant") return e;
+      if (e.type === "message" && e.message?.role === "user") break;
+      // Retain the entire turn, including tool calls/results and final reply,
+      // not merely the first assistant tool-call message.
+      leaf = e;
     }
-    return userEntry;
+    return leaf;
   }
 
   pi.registerCommand("bridge-fork", {

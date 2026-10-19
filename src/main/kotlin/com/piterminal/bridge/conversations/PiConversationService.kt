@@ -594,13 +594,9 @@ class PiConversationService(private val project: Project) {
     private fun schedulePendingForkCommand(conversationId: String) {
         val command = pendingForkCommands.remove(conversationId) ?: return
         ApplicationManager.getApplication().executeOnPooledThread {
-            // Watchdog: the first send may race the TUI becoming ready (the
-            // command would be swallowed) — retry until the session rebind
-            // (fork happened) or the terminal is gone. A repeat command after
-            // a successful fork is a no-op: the entry no longer matches on
-            // the new active branch... unless the text matches an earlier
-            // message, so also stop once the session id differs from the
-            // one bound at first-send time.
+            // Retry until the session rebind (fork happened) or the terminal
+            // is gone. Inclusive forks retain the selected message, so a retry
+            // is NOT inherently a no-op; observe the session id between sends.
             val fullCommand = "/bridge-fork ${command.messageIndex} ${command.encodedText}"
             var sentSessionId: String? = null
             var attempts = 0
@@ -626,10 +622,6 @@ class PiConversationService(private val project: Project) {
                     logger.info("Fork watchdog: rebind observed for $conversationId ($sentSessionId -> $bound) after $attempts attempts")
                     return@executeOnPooledThread
                 }
-                // Clear the TUI editor first: a held (unexecuted) previous
-                // command would otherwise be concatenated onto this paste and
-                // corrupt the base64 arguments.
-                terminal().sendText(conversationId, "\u0003")
                 logger.info("Fork watchdog: sending /bridge-fork attempt $attempts for $conversationId (bound=$bound)")
                 terminal().sendText(conversationId, fullCommand)
                 sentSessionId = bound ?: sentSessionId

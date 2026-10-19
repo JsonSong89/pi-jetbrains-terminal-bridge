@@ -64,6 +64,14 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Test bridge extension command handlers
+        run: node --test tests/bridge-extension.test.mjs
+
       - name: Set up JDK 21
         uses: actions/setup-java@v5
         with:

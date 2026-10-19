@@ -20,9 +20,8 @@ import java.nio.file.Paths
  * PI_LAUNCHER_PORT/TOKEN/TAB_KEY it does nothing, so pi instances not
  * launched by the plugin are unaffected.
  *
- * Note: bump [VERSION] whenever the resource changes shape/behavior so the
- * installed file is rewritten on the next Pi launch. Removing the file under
- * ~/.pi/agent/extensions/ also forces a reinstall.
+ * Updates are detected by full resource content comparison; VERSION stays 6
+ * during pre-tag development. Removing the managed file also forces reinstall.
  */
 object PiBridgeInstaller {
 

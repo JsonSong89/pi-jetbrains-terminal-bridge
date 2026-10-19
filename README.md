@@ -81,16 +81,24 @@ everything after it is dropped — with an empty input, so you continue from tha
 exact point in a fresh session. The original conversation stays untouched.
 Under the hood the plugin launches pi with `--fork <session>` and the bridge
 extension's `/bridge-fork` command (fork at the turn's leaf entry) trims the
-copy. Rewind is the in-session counterpart: same trim point, but the trimmed
-message's text is pre-filled in the panel input for editing, and the session
-stays the same.
+copy. The endpoint is the last entry before the next user message, including
+all tool calls/results and the final reply, not just the first assistant entry.
+This panel action deliberately differs from native `/fork`'s default edit-before
+behavior.
 
-The **Rewind** button (undo icon, left of Fork) is the in-session variant for
-pi's `/tree`: it calls `navigateTree` in the same session — no new session, no
-terminal restart — so everything after that message (its AI reply included)
-drops out of the active branch and the model context, and the message text is
-pre-filled in the panel for editing. Rewind, then ask your next question from
-exactly that point. The tree entries stay in the jsonl, exactly like `/tree`.
+The **Rewind** button (undo icon, left of Fork) calls `navigateTree` on the
+selected user message's **parent** in the same session — no new session, no
+terminal restart. The selected message itself and everything after it leave
+the active branch and model context. Only the IDEA input is pre-filled with
+the selected text for editing; the TUI editor is not pre-filled. Tree entries
+remain in the jsonl. Rewinding the first entry without a parent is currently
+unsupported and reports a warning.
+
+Bridge command regression tests (no IDE or Gradle build required):
+`node --test tests/bridge-extension.test.mjs`. CI runs these against the actual
+packaged resource before building. Extension VERSION stays **6** before tagging;
+installation compares full file contents, and updated code takes effect in a
+newly opened Pi terminal.
 
 In short: the IDE panel gives you structure (persistent list, working badges,
 archived sessions, click-to-resume), the TUI gives you pi's full interactive
