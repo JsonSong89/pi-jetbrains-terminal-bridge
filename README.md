@@ -133,4 +133,9 @@ Architecture and decision records live in [`docs/tasks/`](docs/tasks/). Notably:
 
 ## Acknowledgements
 
-Part of the inspiration for this project came from [pi-agent-launcher](https://github.com/haokanjiang/pi-agent-launcher). Thanks!
+- Thanks to the [Linux.do](https://linux.do/) community for the support and help along the way.
+- Thanks to [pi-agent-launcher](https://github.com/haokanjiang/pi-agent-launcher) — this project was forked from it at commit `72ea264` (v0.1.4) and evolved through 0.2.x. By 0.3.x the context-management approach we wanted had diverged from the original project's underlying philosophy, so we left the fork network and started fresh. Much gratitude for the original work.
+
+## License
+
+[MIT](LICENSE)

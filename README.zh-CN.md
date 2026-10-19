@@ -123,4 +123,9 @@ JDK 21 toolchain，IntelliJ Platform Gradle Plugin 2.x，目标 2026.1，`sinceB
 
 ## 致谢
 
-本项目部分灵感来源于 [pi-agent-launcher](https://github.com/haokanjiang/pi-agent-launcher)，表示感谢！
+- 感谢 [Linux.do](https://linux.do/) 社区的支持与帮助。
+- 感谢 [pi-agent-launcher](https://github.com/haokanjiang/pi-agent-launcher) —— 本项目从其 Commit `72ea264`（v0.1.4）fork 而来，迭代到 0.2.x 之后，发现我们想要的上下文管理方式和原项目底层哲学完全不同，所以在 0.3.x 离开了 fork 网络、独立演进。感谢原项目的工作。
+
+## 许可证
+
+[MIT](LICENSE)
