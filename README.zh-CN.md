@@ -27,7 +27,7 @@
   - 面板中重命名会话（禁止重名）
 - **一键启动** —— 工具栏按钮在 Terminal 工具窗中打开专属 Pi 标签页，按配置的模型 / thinking 级别 / 额外参数运行 `pi`。
 - **发送到 Pi** —— 编辑器选中代码，右键 → *Send to Pi*，文件引用（`@path/file.go#L10-25`）直达 Pi 输入框。
-- **每条消息可 Fork / Rewind** —— 用户消息卡片自带两个动作：**Fork** 在该消息处复制出新会话（pi `/fork` 语义——只带之前的历史，消息文本回到输入框待改）；**Rewind** 在当前会话内回退到该消息（pi `/tree` 语义——之后的对话退出模型上下文，不换会话）。
+- **每条消息可 Fork / Rewind** —— 用户消息卡片自带两个动作，语义刻意不同：**Fork** 复制出新会话，保留到该消息（含该轮完整回复）为止，其后历史全部丢弃、输入框留空；**Rewind** 不换会话，把活跃分支退到该消息**之前**（pi `/tree` 语义——该消息及之后的对话退出模型上下文，消息文本回到输入框待改）。
 - **Pi 写完立刻同步** —— 一收到 write/edit 工具结果就刷新对应文件，不用等 IDEA 大约 10 秒的磁盘轮询。也可选再打开该文件。
 - **通知（默认关闭，需在设置中开启）**
   - agent 结束时气泡通知（含出错 / 中止原因）——仅 IDE 在后台时弹出；点击可定位到对应终端
@@ -113,6 +113,7 @@ CI 会执行实际打包资源里的两个 handler。打 tag 前扩展 VERSION �
 ## 构建
 
 ```bash
+node --test tests/bridge-extension.test.mjs   # bridge 扩展命令 handler（秒级，无需 Gradle）
 ./gradlew build        # 验证
 ./gradlew runIde       # 沙箱 IDE
 ./gradlew buildPlugin  # 可分发 zip

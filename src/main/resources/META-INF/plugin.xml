@@ -38,7 +38,7 @@
         <li><b>One-click launch</b> from the toolbar in a dedicated Terminal tab</li>
         <li><b>Send to Pi</b> — select code, right-click, and send a file reference (<code>@path/file.go#L10-25</code>) to Pi's input. The panel input also has a context menu and accepts files dropped from the Project view.</li>
         <li><b>Immediate VFS refresh</b> when Pi writes a file — no waiting on the IDE's ~10s disk poll; optionally also open the file</li>
-        <li><b>Fork / Rewind</b> on every message card — fork into a new conversation at that message (pi's <code>/fork</code>), or rewind the current session to it (pi's <code>/tree</code>); in both cases the message text returns to the panel input for editing</li>
+        <li><b>Fork / Rewind</b> on every message card — <b>Fork</b> starts a new conversation at that message: history up to and including the message and its full reply is kept, everything after is dropped, and the input stays empty. <b>Rewind</b> stays in the same session and moves the branch back to <i>before</i> that message (pi's <code>/tree</code>), pre-filling the panel input with its text for re-sending. The two are deliberately different.</li>
         <li><b>Notifications</b> — optional balloon when the agent finishes (only while the IDE is in the background; click to focus that terminal)</li>
         <li><b>Flexible configuration</b> for models, thinking levels, and launch options</li>
     </ul>
@@ -98,6 +98,7 @@
         <li><b>一键启动</b> —— 工具栏按钮在 Terminal 工具窗中打开专属 Pi 标签页</li>
         <li><b>发送到 Pi</b> —— 选中代码，右键发送文件引用（<code>@path/file.go#L10-25</code>）到 Pi 输入栏。面板输入栏也有右键菜单，并接受从 Project 视图拖入的文件。</li>
         <li><b>Pi 写完立刻刷新</b> —— 不等 IDEA 大约 10 秒的磁盘轮询；也可选打开该文件</li>
+        <li><b>Fork / Rewind</b> —— 每条用户消息卡片都有两个按钮，语义刻意不同：<b>Fork</b> 新开一个会话，保留到该消息（含该轮完整回复）为止，其后历史全部丢弃，输入框留空；<b>Rewind</b> 不换会话，把当前会话的活跃分支退到该消息<b>之前</b>（对应 pi 的 <code>/tree</code>），仅把该消息文本预填到面板输入框供修改重发。</li>
         <li><b>通知</b> —— 可选：agent 结束时气泡提醒（仅 IDE 在后台时弹出；点击可定位到对应终端）</li>
         <li><b>灵活配置</b> —— 模型、thinking 级别与启动参数</li>
     </ul>
@@ -127,10 +128,11 @@
     <change-notes><![CDATA[
     <h3>0.3.4</h3>
     <ul>
-        <li><b>Fork a conversation at any message.</b> Each user-message card has a Fork button (branch icon): it creates a new conversation named <code>&lt;original&gt;-fork</code> that carries the history <b>before</b> that message, with the message text pre-filled in the panel input for editing — exactly pi's <code>/fork</code> semantics, while the original conversation stays untouched.</li>
-        <li><b>Rewind within the current session.</b> The Rewind button (undo icon) is the in-session variant of pi's <code>/tree</code>: it navigates the session tree back to that message in the same session — no new session, no terminal restart — so later questions and AI replies drop out of the model context, and the message text returns to the panel input for re-sending. Tree entries stay in the session file, like <code>/tree</code>.</li>
+        <li><b>Fork a conversation at any message.</b> Each user-message card has a Fork button (branch icon): it creates a new conversation named <code>&lt;original&gt;-fork</code> that keeps the history <b>up to and including</b> that message and its complete reply — tool calls/results included — and drops everything after it. The panel input stays empty, so you continue from exactly that point in a fresh session; the original conversation is untouched. This is intentionally not pi's default <code>/fork</code> (edit-before): the message you forked on stays in history.</li>
+        <li><b>Rewind within the current session.</b> The Rewind button (undo icon) is the in-session variant of pi's <code>/tree</code>: it moves the session branch back to <b>before</b> that message — no new session, no terminal restart — so the message itself and everything after it drop out of the model context, and the message text is pre-filled in the panel input for re-sending. Tree entries stay in the session file, like <code>/tree</code>. Fork and Rewind are kept distinct on purpose.</li>
         <li><b>Fix: files now refresh immediately while Pi is still working.</b> The bridge's file-write report read the wrong event fields and never fired, leaving the IDE to its ~10s disk poll. Reports now fire per <code>edit</code>/<code>write</code> tool result, so the editor syncs right after each file write.</li>
         <li>Message-card actions reordered (rewind / fork / copy / delete), smaller icon buttons, and a proper trash icon for delete; the delete tooltip clarifies it only removes the panel card, not the Pi session.</li>
+        <li>Fix: the bridge extension's argument parser was missing, so Fork/Rewind commands failed with <code>parseMessageArgs is not defined</code>; command handlers are now covered by regression tests (<code>node --test tests/bridge-extension.test.mjs</code>, also run in CI).</li>
         <li>Fix: rewind no longer echoes the message text into the terminal's editor; only the panel input carries it.</li>
         <li>Debug logs (bridge message routing, file-refresh traces) follow the platform convention — enable via Help → Diagnostic Tools → Debug Log Settings with <code>com.piterminal.bridge</code>.</li>
     </ul>

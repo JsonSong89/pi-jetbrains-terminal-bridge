@@ -27,7 +27,7 @@ It is **not** a vibe-coding cockpit. It is for people who want more control over
   - rename a conversation in the panel (duplicates forbidden)
 - **One-click launch** — the toolbar button opens a dedicated Pi tab in the Terminal tool window and runs `pi` with your configured model / thinking level / extra args.
 - **Send to Pi** — select code in the editor, right-click → *Send to Pi*, and a file reference (`@path/file.go#L10-25`) lands in Pi's input.
-- **Fork / Rewind on every message** — each user-message card carries fork and rewind actions: **fork** creates a new conversation at that message (pi's `/fork` semantics — history before it, message text back in the input), **rewind** moves the current session back to it (pi's `/tree` semantics — later turns drop out of the model context, no session switch).
+- **Fork / Rewind on every message** — each user-message card carries both actions, with deliberately different semantics: **fork** creates a new conversation that keeps history **up to and including** that message and its full reply (everything after is dropped, input left empty); **rewind** keeps the same session and moves the branch back to **before** that message (pi's `/tree` semantics — the message and later turns drop out of the model context, text back in the input for editing).
 - **Stay in sync with Pi's writes** — as soon as Pi finishes a write/edit tool, the IDE refreshes that file so you don't wait on the ~10s VFS poll. Optionally also open the file in the editor.
 - **Notifications (opt-in)**
   - balloon when the agent finishes (including error/abort reason) — only while the IDE is in the background; click to focus that terminal
@@ -127,6 +127,7 @@ Defaults — rebindable in **Settings → Keymap → "Pi Terminal Bridge"**:
 ## Build
 
 ```bash
+node --test tests/bridge-extension.test.mjs   # bridge extension command handlers (fast, no Gradle)
 ./gradlew build        # verify
 ./gradlew runIde       # sandbox IDE
 ./gradlew buildPlugin  # distributable zip
