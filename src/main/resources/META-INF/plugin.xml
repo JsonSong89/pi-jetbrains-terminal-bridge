@@ -126,7 +126,7 @@
         ]]></description>
 
     <change-notes><![CDATA[
-    <h3>0.3.4</h3>
+    <h3>0.3.5</h3>
     <ul>
         <li><b>Fork a conversation at any message.</b> Each user-message card has a Fork button (branch icon): it creates a new conversation named <code>&lt;original&gt;-fork</code> that keeps the history <b>up to and including</b> that message and its complete reply — tool calls/results included — and drops everything after it. The panel input stays empty, so you continue from exactly that point in a fresh session; the original conversation is untouched. This is intentionally not pi's default <code>/fork</code> (edit-before): the message you forked on stays in history.</li>
         <li><b>Rewind within the current session.</b> The Rewind button (undo icon) is the in-session variant of pi's <code>/tree</code>: it moves the session branch back to <b>before</b> that message — no new session, no terminal restart — so the message itself and everything after it drop out of the model context, and the message text is pre-filled in the panel input for re-sending. Tree entries stay in the session file, like <code>/tree</code>. Fork and Rewind are kept distinct on purpose.</li>
