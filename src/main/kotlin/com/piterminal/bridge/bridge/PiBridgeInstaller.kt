@@ -20,14 +20,15 @@ import java.nio.file.Paths
  * PI_LAUNCHER_PORT/TOKEN/TAB_KEY it does nothing, so pi instances not
  * launched by the plugin are unaffected.
  *
- * Updates are detected by full resource content comparison; VERSION stays 6
- * during pre-tag development. Removing the managed file also forces reinstall.
+ * Updates are detected by full resource content comparison; bump VERSION when
+ * the extension's observable behavior changes so diagnostics can tell stale
+ * copies apart. Removing the managed file also forces reinstall.
  */
 object PiBridgeInstaller {
 
     private val logger = Logger.getInstance(PiBridgeInstaller::class.java)
 
-    private const val VERSION = 6
+    private const val VERSION = 7
 
     private const val RESOURCE_PATH = "/bridge/pi-launcher-bridge.ts"
 
@@ -55,9 +56,8 @@ object PiBridgeInstaller {
     }
 
     private fun isCurrent(path: Path): Boolean = try {
-        // Compare full content, not the version constant: the version stays
-        // at 6 until the first tagged release, so any resource change must
-        // still rewrite the installed file.
+        // Compare full content, not the version constant: any resource change
+        // must rewrite the installed file even if VERSION was not bumped.
         Files.readString(path) == source
     } catch (_: Exception) {
         false

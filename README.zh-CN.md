@@ -41,7 +41,7 @@ IDEA（PiBridgeServer，loopback TCP + token）
    ▲                                   │
    │ env PI_LAUNCHER_PORT/TOKEN/TAB_KEY│  pi --session <path> | --session-id <uuid> --name <tab>
    │                                   ▼
-Terminal 标签页 ── ~/.pi/agent/extensions/pi-launcher-bridge.ts（懒安装，内容 hash 版本化）
+Terminal 标签页 ── ~/.pi/agent/extensions/pi-launcher-bridge.ts（懒安装，按完整内容比对更新）
 ```
 
 - extension 在首次终端启动时安装，上报 `session_changed`、`agent_state`、`model_changed`、`file_modified`（取自 `tool_result`，文件实际写完之后）。

@@ -7,6 +7,10 @@ const VERSION = @EXTENSION_VERSION@;
 
 let seq = Date.now() * 1000;
 let sessionId;
+// Stop reason of the most recent low-level run. agent_settled only carries
+// `aborted`; the error outcome comes from the last assistant message of the
+// run. agent_start resets it so a successful retry is not reported as error.
+let lastRunStopReason;
 
 function enabled() {
   return !!PORT && !!TOKEN && !!TAB_KEY;
@@ -56,11 +60,32 @@ function reportSessionChanged(ctx) {
   if (sessionId) send("session_changed", { sessionId, extensionVersion: VERSION });
 }
 
+// pi's ModelSelectEvent carries a Model object, not a modelId string. Use the
+// same "provider/id" label as the IDE model picker; fall back to id alone when
+// a provider is absent (older/custom models).
+function modelLabel(model) {
+  if (!model || typeof model !== "object") return undefined;
+  const id = typeof model.id === "string" ? model.id : "";
+  const provider = typeof model.provider === "string" ? model.provider : "";
+  if (provider && id) return `${provider}/${id}`;
+  return id || undefined;
+}
+
+function reportModel(model) {
+  const modelId = modelLabel(model);
+  if (modelId) send("model_changed", { modelId });
+}
+
 export default function (pi) {
   if (!enabled()) return;
 
   pi.on("session_start", (_event, ctx) => {
+    lastRunStopReason = undefined;
     reportSessionChanged(ctx);
+    // model_select is only emitted when the selection actually changes, so a
+    // session restored on its existing model would otherwise stay blank until
+    // the first /model. Report the current model on every session start.
+    reportModel(ctx?.model);
   });
 
   pi.on("session_shutdown", (_event, ctx) => {
@@ -69,23 +94,38 @@ export default function (pi) {
   });
 
   pi.on("agent_start", (_event, _ctx) => {
+    lastRunStopReason = undefined;
     send("agent_state", { state: "working" });
   });
 
-  pi.on("agent_settled", (event, _ctx) => {
-    const data = { state: "idle" };
+  pi.on("agent_end", (event, _ctx) => {
     try {
-      const reason = event?.data?.stopReason ?? event?.stopReason;
-      if (reason) data.stopReason = String(reason);
-    } catch (_e) {}
-    send("agent_state", data);
+      const messages = Array.isArray(event?.messages) ? event.messages : [];
+      for (let i = messages.length - 1; i >= 0; i--) {
+        const message = messages[i]?.message ?? messages[i];
+        if (message?.role === "assistant") {
+          lastRunStopReason = typeof message.stopReason === "string" ? message.stopReason : undefined;
+          return;
+        }
+      }
+      lastRunStopReason = undefined;
+    } catch (_e) {
+      lastRunStopReason = undefined;
+    }
+  });
+
+  pi.on("agent_settled", (event, _ctx) => {
+    // AgentSettledEvent in pi 1.4 is { type, aborted }. There is no
+    // stopReason field; `error` comes from the final assistant message.
+    const stopReason = event?.aborted === true
+      ? "aborted"
+      : lastRunStopReason === "error" ? "error" : undefined;
+    lastRunStopReason = undefined;
+    send("agent_state", stopReason ? { state: "idle", stopReason } : { state: "idle" });
   });
 
   pi.on("model_select", (event, _ctx) => {
-    try {
-      const modelId = event?.data?.modelId ?? event?.modelId;
-      if (modelId) send("model_changed", { modelId: String(modelId) });
-    } catch (_e) {}
+    reportModel(event?.model);
   });
 
   // Report from tool_result: the file is actually written by then; a

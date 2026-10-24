@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 
 // Execute the actual packaged resource, not a duplicate implementation.
 const source = readFileSync(new URL('../src/main/resources/bridge/pi-launcher-bridge.ts', import.meta.url), 'utf8')
-  .replace('@EXTENSION_VERSION@', '6')
+  .replace('@EXTENSION_VERSION@', '7')
   .replace('export default function (pi)', 'function install(pi)');
 const message = (id, parentId, role, content) => ({ id, parentId, type: 'message', message: { role, content } });
 const branch = [
@@ -16,20 +16,47 @@ const branch = [
 ];
 function harness(entries = branch, enabled = true) {
   const commands = new Map();
-  const calls = [], notices = [];
-  const sandbox = vm.createContext({ Buffer, process: { env: enabled ? {
-    PI_LAUNCHER_PORT: '12345', PI_LAUNCHER_TOKEN: 'test', PI_LAUNCHER_TAB_KEY: 'test',
-  } : {} } });
+  const handlers = new Map();
+  const calls = [], notices = [], sent = [];
+  const sandbox = vm.createContext({
+    Buffer,
+    process: { env: enabled ? {
+      PI_LAUNCHER_PORT: '12345', PI_LAUNCHER_TOKEN: 'test', PI_LAUNCHER_TAB_KEY: 'test',
+    } : {} },
+    // send() is best-effort and opens a real loopback socket. Capture the
+    // payloads instead so event-handler tests can assert protocol data.
+    require(name) {
+      if (name !== 'node:net') throw new Error(`unexpected require: ${name}`);
+      return { connect: () => ({
+        setTimeout() {},
+        on(event, callback) { if (event === 'connect') callback(); },
+        write(payload) { sent.push(JSON.parse(payload.trim())); },
+        end() {}, destroy() {},
+      }) };
+    },
+    setTimeout: () => ({ unref() {} }),
+  });
   vm.runInContext(source + '\ninstall(pi);', Object.assign(sandbox, { pi: {
-    on() {}, registerCommand(name, command) { commands.set(name, command); },
+    on(name, handler) {
+      if (!handlers.has(name)) handlers.set(name, []);
+      handlers.get(name).push(handler);
+    },
+    registerCommand(name, command) { commands.set(name, command); },
   } }));
   const ctx = {
-    sessionManager: { getBranch: () => structuredClone(entries) },
+    sessionManager: {
+      getBranch: () => structuredClone(entries),
+      getSessionId: () => 'session-1',
+    },
+    model: { provider: 'anthropic', id: 'claude-sonnet-4-5', name: 'Claude Sonnet 4.5' },
     ui: { notify: (text, level) => notices.push({ text, level }) },
     fork: async (id, options) => { calls.push(['fork', id, options.position]); },
     navigateTree: async id => { calls.push(['rewind', id]); },
   };
-  return { commands, calls, notices, ctx,
+  return { commands, calls, notices, sent, ctx,
+    emit: async (name, event = {}, eventCtx = ctx) => {
+      for (const handler of handlers.get(name) ?? []) await handler(event, eventCtx);
+    },
     run: (name, args) => commands.get(name).handler(args, ctx) };
 }
 const args = (index, text) => `${index} ${Buffer.from(text).toString('base64')}`;
@@ -110,6 +137,62 @@ test('API failures are visible and never reported as success', async () => {
     assert.ok(!h.notices.some(n => n.text.includes('forked —')));
   }
 });
+test('session_start reports the session id and the current Model object', async () => {
+  const h = harness();
+  await h.emit('session_start', { type: 'session_start' });
+  assert.deepEqual(h.sent.map(m => m.type), ['session_changed', 'model_changed']);
+  assert.equal(h.sent[0].data.sessionId, 'session-1');
+  assert.equal(h.sent[1].data.modelId, 'anthropic/claude-sonnet-4-5');
+});
+
+test('model_select reads event.model, not a modelId field', async () => {
+  const h = harness();
+  await h.emit('model_select', {
+    type: 'model_select',
+    model: { provider: 'openai', id: 'gpt-5', name: 'GPT-5' },
+    previousModel: undefined,
+    source: 'set',
+  });
+  assert.deepEqual(h.sent.map(m => m.data), [{ modelId: 'openai/gpt-5' }]);
+});
+
+test('agent_settled reports aborted from event.aborted', async () => {
+  const h = harness();
+  await h.emit('agent_start', { type: 'agent_start' });
+  await h.emit('agent_settled', { type: 'agent_settled', aborted: true });
+  const states = h.sent.filter(m => m.type === 'agent_state');
+  assert.deepEqual(states.at(-1).data, { state: 'idle', stopReason: 'aborted' });
+});
+
+test('agent_settled reports error from the final assistant message', async () => {
+  const h = harness();
+  await h.emit('agent_start', { type: 'agent_start' });
+  await h.emit('agent_end', {
+    type: 'agent_end',
+    messages: [{ role: 'assistant', stopReason: 'error', errorMessage: 'provider failed' }],
+  });
+  await h.emit('agent_settled', { type: 'agent_settled', aborted: false });
+  const states = h.sent.filter(m => m.type === 'agent_state');
+  assert.deepEqual(states.at(-1).data, { state: 'idle', stopReason: 'error' });
+});
+
+test('successful retry clears a previous error before settlement', async () => {
+  const h = harness();
+  await h.emit('agent_start', { type: 'agent_start' });
+  await h.emit('agent_end', {
+    type: 'agent_end',
+    messages: [{ role: 'assistant', stopReason: 'error' }],
+  });
+  await h.emit('agent_start', { type: 'agent_start' });
+  await h.emit('agent_end', {
+    type: 'agent_end',
+    messages: [{ role: 'assistant', stopReason: 'stop' }],
+  });
+  await h.emit('agent_settled', { type: 'agent_settled', aborted: false });
+  const states = h.sent.filter(m => m.type === 'agent_state');
+  assert.deepEqual(states.at(-1).data, { state: 'idle' });
+});
+
 test('unmanaged pi instances do not register commands', () => {
   assert.equal(harness(branch, false).commands.size, 0);
 });

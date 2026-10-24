@@ -1,7 +1,8 @@
-# Pi ↔ IDEA 桥接设计（对齐 0.3.5 实现）
+# Pi ↔ IDEA 桥接设计（对齐 0.3.6 实现）
 
 > 本文档按 2026-10-24 的 `src/main` 代码重写，取代 2026-09-30 首版。
-> 适用基线：插件 0.3.5（`sinceBuild=243`，目标 2026.1）、pi 扩展 `VERSION = 6`、通道协议 `v = 1`。
+> 适用基线：插件 0.3.6（`sinceBuild=243`，目标 2026.1）、pi 1.4.0、pi 扩展 `VERSION = 7`、通道协议 `v = 1`。
+> 事件语义按 pi 1.4.0 的 `docs/json.md` 与 `dist/core/extensions/types.d.ts` 核对。
 >
 > 首版里「计划做 / 已交付」的条目，以本文的「现状」描述为准；设计意图与当前实现的偏差统一收进 §11，不再把未落地能力写成已完成。
 
@@ -282,12 +283,12 @@ Windows shell 探测：
 ### 5.1 安装与版本
 
 - 路径硬编码为 `~/.pi/agent/extensions/pi-launcher-bridge.ts`，**不跟随** `PI_CODING_AGENT_DIR`；设置页诊断也读这个固定路径。
-- 源码：插件资源 `src/main/resources/bridge/pi-launcher-bridge.ts`；`@EXTENSION_VERSION@` 在 `PiBridgeInstaller` 加载时替换为 `VERSION = 6`。
+- 源码：插件资源 `src/main/resources/bridge/pi-launcher-bridge.ts`；`@EXTENSION_VERSION@` 在 `PiBridgeInstaller` 加载时替换为 `VERSION = 7`。
 - 每次启动 Terminal 前调用 `ensureInstalled()`：
   - 文件不存在 → 写入；
   - 文件存在但**完整内容**与资源不一致 → 覆盖；
   - 内容一致 → 跳过。
-- 用内容比对而不是只看版本号：开发期 `VERSION` 保持 6，任何源码改动也必须让已安装文件被重写。
+- 用内容比对而不是只看版本号：`VERSION` 只用于诊断展示；任何源码改动都必须让已安装文件被重写。
 - 设置页诊断显示：未安装 / 已安装且最新 / 已过期（下次启动重写）/ 路径。
 - 覆盖后需要新开 Pi Terminal 才生效（已运行的 pi 进程不会热加载）。
 
@@ -297,16 +298,19 @@ factory 在 env 不完整时**直接 return**，不注册任何 handler/command�
 
 | pi 事件 | extension 行为 | 上报 data |
 |---|---|---|
-| `session_start` | 刷新 `ctx.sessionManager.getSessionId()` 缓存 | `session_changed { sessionId, extensionVersion }` |
+| `session_start` | 刷新 `ctx.sessionManager.getSessionId()` 缓存；同时上报 `ctx.model`（`model_select` 只在模型变化时触发） | `session_changed { sessionId, extensionVersion }` + 可选 `model_changed { modelId }` |
 | `session_shutdown` | 刷新缓存；有 id 才发 | `session_stopped {}` |
-| `agent_start` | 直接发 | `agent_state { state: "working" }` |
-| `agent_settled` | 发 idle；尝试从 `event.data.stopReason` / `event.stopReason` 取原因 | `agent_state { state: "idle", stopReason? }` |
-| `model_select` | 尝试从 `event.data.modelId` / `event.modelId` 取模型 | `model_changed { modelId }` |
+| `agent_start` | 清空上一轮 stopReason 缓存；发 working | `agent_state { state: "working" }` |
+| `agent_end` | 从本轮最后一条 assistant message 缓存 `stopReason`（仅缓存，不上报） | — |
+| `agent_settled` | 发 idle；`event.aborted` → `aborted`，否则缓存为 `error` 时 → `error` | `agent_state { state: "idle", stopReason? }` |
+| `model_select` | 从 `event.model`（`Model` 对象）取 `provider` + `id`，格式 `provider/id` | `model_changed { modelId }` |
 | `tool_result` | 仅 `edit` / `write` / `patch` / `apply`，从 `input`/`args`、`details`/`result`、`input.edits[]` 提取路径 | 每个路径一条 `file_modified { path }` |
 
 说明：
 
 - `tool_result` 而不是 `tool_call`：只有工具执行完，文件才真正写盘；在 `tool_result` 发刷新才不会与写入竞态。
+- `agent_settled` 的 `AgentSettledEvent` 只有 `aborted: boolean`，没有错误字段；`error` 从 `agent_end` 本轮最后一条 assistant message 的 `stopReason` 取得，`agent_start` 会重置缓存，避免自动重试成功后被误报为 error。1.4 另有 `agent_before_settle.outcome`，但注册该 handler 会触发 pi 的 boundary 路径，当前不需要额外副作用。
+- `model_select` 的 `event.model` 是 `Model` 对象（含 `provider`/`id`/`name`）；`session_start` 额外上报 `ctx.model`，覆盖「恢复会话但模型没变、因此没有 model_select」的情况。
 - 只处理「修改类」工具；`read`/`grep`/`find` 等不触发文件刷新。
 - 路径提取覆盖 `path`、`filePath`、`file_path`、`file`，以及 `edits` 数组中的字符串或 `{path}`。
 - 没有实现 `usage`/成本上报，也没有 `tool_call` 危险命令确认。
@@ -375,11 +379,11 @@ extension 在 env 启用时注册两个内部命令。IDEA 通过 `sendText` 把
 - **`agent_state`**：
   - `working` → 加入 `workingIds`；`idle` → 移除。
   - 仅在「之前 working、现在 idle」时考虑通知；还需满足设置 `notifyOnAgentEnd` 且 `PiBridgeUi.isIdeActive(project)` 为 false（IDE 在后台）。
-  - 通知正文根据 `stopReason` 拼 ` (stopped with an error)` / ` (aborted)`；当前 pi 的 `agent_settled` 实际字段见 §11。
+  - 通知正文根据 `stopReason` 拼 ` (stopped with an error)` / ` (aborted)`；`aborted` 来自 `agent_settled`，`error` 来自 `agent_end` 缓存的最后一条 assistant `stopReason`。
   - 通知带 `Open terminal` 动作与超链接，点击 `revealTerminal()`。
   - 状态栏 working 数随之更新。
 - **`session_stopped`**：从 `workingIds` 移除，刷新面板和状态栏；不关闭 Terminal 条目。
-- **`model_changed`**：按 tabKey 记到 `models` map；面板状态行显示当前会话模型。孤儿 tabKey 也会记录，但只有存在会话时才展示。
+- **`model_changed`**：按 tabKey 记到 `models` map；面板状态行显示当前会话模型。`session_start` 会先上报一次初始模型，因此不需要等用户切模型。孤儿 tabKey 也会记录，但只有存在会话时才展示。
 - **`file_modified`**：见 §8；不要求 tabKey 对应会话存在。
 
 ### 6.3 孤儿消息
@@ -557,26 +561,24 @@ Rewind 是乐观更新：命令发送前面板历史已裁剪，如果 extension
 | 1 | **Fork 失败不回滚**：`/bridge-fork` 未确认时，新会话停在 `--fork` 全量副本，但面板 `messages` 已裁剪；若超时后命令才完成，下一次换绑还会把中间副本当普通旧会话归档 | 面板显示与 pi 实际历史不一致 | 失败时提示并提供「保留全量 / 重建会话」；或确认成功后再裁剪面板 |
 | 2 | **Rewind 乐观更新**：面板先裁剪再发命令；命令失败/被 TUI 忙碌打断时不回滚 | 面板历史丢失，pi 分支可能未变 | 等 extension 确认后再裁剪，或失败时恢复快照 |
 | 3 | **Fork/Rewind 指令通过 TUI 输入发送**：3 秒 settle 窗口内用户若正在输入，slash command 可能拼接进草稿 | 命令解析失败或污染用户输入 | 派发前检测 TUI 输入状态，或改为真正的 server→pi 命令通道 |
-| 4 | **`model_select` 字段漂移**：当前 pi 事件提供 `event.model`（`Model` 对象）；extension 读的是 `event.data.modelId` / `event.modelId` | `model_changed` 很可能不发出，面板不显示模型 | 改为读取 `event.model.provider` + `event.model.id` |
-| 5 | **`agent_settled` 字段漂移**：当前 pi 事件提供 `aborted: boolean`；extension 读 `stopReason` | 结束通知的错误/中止详情基本不会出现 | 改为读 `event.aborted`，并补充错误来源 |
-| 6 | **归档复活可能重名/残留后缀**：`restoreTerminal` 只 `removeSuffix(" (archived)")`，且不查重 | 复活后可能与 live 标题重名；`(archived) (2)` 不会被去掉 | 复活时走统一的唯一标题分配 |
-| 7 | **`tabName` 不可变**：重命名只改面板标题 | Terminal 标签名、pi 会话名（`--name`）保持旧值，直到下次 launch | 重命名时同步 terminal 标签；需要时通过命令同步 pi name |
-| 8 | **`session_stopped` 不清 closed 状态**：只清 working | 面板的「closed」由 Terminal 存活决定，不是由 pi 事件决定 | 明确 closed 的判定来源，避免两套状态 |
-| 9 | **没有运行期对账/mtime 重绑** | 桥接长时间失联期间的会话切换只能等下次 launch 扫描 | 保持现状（terminal 随 IDE 关闭终止，风险有限）；确需时再加 |
-| 10 | **Extra args 未过滤 `--no-session`** | 与插件注入的 session 参数可能冲突 | 加入冲突列表 |
-| 11 | **只部分跟随 pi 的目录配置**：会话扫描支持 `PI_CODING_AGENT_DIR`，但不支持 `PI_CODING_AGENT_SESSION_DIR`；extension 安装与 `models.json` 又固定读 `~/.pi/agent` | 自定义 agent/session 目录时，extension 可能不被加载、模型列表为空、fork 源检查误判 | 统一抽一个 `agentDir()` / `sessionDir()`，安装、扫描、模型读取共用 |
-| 12 | **cmd.exe 不支持实时桥接** | 面板不同步，fork/rewind 不可用 | 保持警告；文档明确 PowerShell 7 |
-| 13 | **桥接安全是「本机单用户」级**：loopback + token，无 TLS/握手/签名 | 同用户本机进程可探测；不适合多用户主机 | 保持现状并在文档声明 |
-| 14 | **面板只记用户消息** | 无法在面板查看 AI 回复/工具输出 | 定位就是 TUI 看结果；不要把它做成聊天镜像 |
-| 15 | **extension 升级需新开 Terminal** | 已运行 pi 不会热加载 | 诊断页提示；必要时提示用户重开 |
-| 16 | **测试只覆盖 extension 命令** | server、状态机、启动参数、文件刷新无自动测试 | 补协议/状态机单测；CI 现有命令测试见 §12 |
-| 17 | **旧数据空 `piSessionId`**：`loadState` 保留空值，注释称「下次启动重新生成」，但当前 launch 路径没有重建逻辑 | 极端遗留 XML 可能导致 `--session-id ''` | 加载时或 launch 前补一次 id |
+| 4 | **归档复活可能重名/残留后缀**：`restoreTerminal` 只 `removeSuffix(" (archived)")`，且不查重 | 复活后可能与 live 标题重名；`(archived) (2)` 不会被去掉 | 复活时走统一的唯一标题分配 |
+| 5 | **`tabName` 不可变**：重命名只改面板标题 | Terminal 标签名、pi 会话名（`--name`）保持旧值，直到下次 launch | 重命名时同步 terminal 标签；需要时通过命令同步 pi name |
+| 6 | **`session_stopped` 不清 closed 状态**：只清 working | 面板的「closed」由 Terminal 存活决定，不是由 pi 事件决定 | 明确 closed 的判定来源，避免两套状态 |
+| 7 | **没有运行期对账/mtime 重绑** | 桥接长时间失联期间的会话切换只能等下次 launch 扫描 | 保持现状（terminal 随 IDE 关闭终止，风险有限）；确需时再加 |
+| 8 | **Extra args 未过滤 `--no-session`** | 与插件注入的 session 参数可能冲突 | 加入冲突列表 |
+| 9 | **只部分跟随 pi 的目录配置**：会话扫描支持 `PI_CODING_AGENT_DIR`，但不支持 `PI_CODING_AGENT_SESSION_DIR`；extension 安装与 `models.json` 又固定读 `~/.pi/agent` | 自定义 agent/session 目录时，extension 可能不被加载、模型列表为空、fork 源检查误判 | 统一抽一个 `agentDir()` / `sessionDir()`，安装、扫描、模型读取共用 |
+| 10 | **cmd.exe 不支持实时桥接** | 面板不同步，fork/rewind 不可用 | 保持警告；文档明确 PowerShell 7 |
+| 11 | **桥接安全是「本机单用户」级**：loopback + token，无 TLS/握手/签名 | 同用户本机进程可探测；不适合多用户主机 | 保持现状并在文档声明 |
+| 12 | **面板只记用户消息** | 无法在面板查看 AI 回复/工具输出 | 定位就是 TUI 看结果；不要把它做成聊天镜像 |
+| 13 | **extension 升级需新开 Terminal** | 已运行 pi 不会热加载 | 诊断页提示；必要时提示用户重开 |
+| 14 | **测试只覆盖 extension 命令与事件** | server、状态机、启动参数、文件刷新无自动测试 | 补协议/状态机单测；CI 现有 extension 测试见 §12 |
+| 15 | **旧数据空 `piSessionId`**：`loadState` 保留空值，注释称「下次启动重新生成」，但当前 launch 路径没有重建逻辑 | 极端遗留 XML 可能导致 `--session-id ''` | 加载时或 launch 前补一次 id |
 
 ---
 
 ## 12. 验证与测试
 
-- `node --test tests/bridge-extension.test.mjs`：12 个用例，直接执行**打包资源**里的 extension 源码（`@EXTENSION_VERSION@` 替换为 6，`export default` 改写为 `install`），覆盖：
+- `node --test tests/bridge-extension.test.mjs`：17 个用例，直接执行**打包资源**里的 extension 源码（`@EXTENSION_VERSION@` 替换为 7，`export default` 改写为 `install`），覆盖：
   - fork 保留完整工具调用轮次、排除后续消息；
   - rewind 导航到目标消息的 parent、不 fork；
   - fork/rewind 连续调用互不污染；
@@ -588,6 +590,10 @@ Rewind 是乐观更新：命令发送前面板历史已裁剪，如果 extension
   - 找不到消息只 warn；
   - 首条消息 rewind 明确失败；
   - API 失败可见、不误报成功；
+  - `session_start` 同时上报 session 与初始 `Model`；
+  - `model_select` 从 `event.model` 取 `provider/id`；
+  - `agent_settled` 读取 `aborted`；
+  - `error` 取自最后一条 assistant，成功重试会清掉旧 error；
   - 未启用 env 的 pi 不注册命令。
 - GitHub Actions：`node --test` 通过后 `./gradlew buildPlugin`；tag 触发 release；release 触发 sign/verify/publish。
 - 本地按仓库约定不主动跑 Gradle 构建；编译与打包交给 CI。
@@ -609,6 +615,8 @@ Rewind 是乐观更新：命令发送前面板历史已裁剪，如果 extension
 - ✅ 恢复语义：不自动复活 Terminal，点击按需恢复。
 - ✅ 通知默认关闭；文件刷新始终开启，打开文件 opt-in。
 - ✅ Fork：保留到消息及完整回复；Rewind：同会话退到消息之前，面板预填文本。
+- ✅ `model_select` 按 pi 1.4 的 `Model` 对象上报 `provider/id`；`session_start` 补报初始模型。
+- ✅ `agent_settled` 用 `aborted` + 最后一条 assistant 的 `stopReason` 还原 error/abort 详情。
 - ✅ IDEA → pi 的 Fork/Rewind 指令走 TUI slash command：Fork 一发送一确认，Rewind 只发送一次；都不反复写输入。
 
 明确不做 / 推迟：
@@ -626,7 +634,7 @@ Rewind 是乐观更新：命令发送前面板历史已裁剪，如果 extension
 | 常量 | 值 | 位置 |
 |---|---|---|
 | 协议版本 | `1` | `PiBridgeServer.PROTOCOL_VERSION` |
-| extension 版本 | `6` | `PiBridgeInstaller.VERSION` |
+| extension 版本 | `7` | `PiBridgeInstaller.VERSION` |
 | 单行上限 | 64K 字符 | `PiBridgeServer.MAX_LINE_LENGTH` |
 | 客户端连接读超时 | 10s | `PiBridgeServer.handle()` |
 | 首次发送超时 / 重试延迟 / 重试超时 | 500ms / 1500ms / 1500ms | `pi-launcher-bridge.ts` |

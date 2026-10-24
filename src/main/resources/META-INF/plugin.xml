@@ -126,6 +126,11 @@
         ]]></description>
 
     <change-notes><![CDATA[
+    <h3>0.3.6</h3>
+    <ul>
+        <li><b>Fix: the panel now shows the current model.</b> The bridge extension read a non-existent <code>modelId</code> field from pi's <code>model_select</code> event; it now reads the <code>Model</code> object (<code>provider/id</code>) and also reports the current model on session start, matching pi 1.4.</li>
+        <li><b>Fix: finish notifications include the error/abort reason.</b> <code>agent_settled</code> only carries <code>aborted</code>; the extension now uses that flag and the final assistant message's <code>stopReason</code>, so the balloon can say “aborted” or “stopped with an error” again.</li>
+    </ul>
     <h3>0.3.5</h3>
     <ul>
         <li><b>Fork a conversation at any message.</b> Each user-message card has a Fork button (branch icon): it creates a new conversation named <code>&lt;original&gt;-fork</code> that keeps the history <b>up to and including</b> that message and its complete reply — tool calls/results included — and drops everything after it. The panel input stays empty, so you continue from exactly that point in a fresh session; the original conversation is untouched. This is intentionally not pi's default <code>/fork</code> (edit-before): the message you forked on stays in history.</li>
