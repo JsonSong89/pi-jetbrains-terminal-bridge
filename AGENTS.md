@@ -25,7 +25,8 @@ settings/       设置存储与 UI
 ui/             右侧 ToolWindow 面板
 ```
 
-pi 侧 extension 源码以 Kotlin 常量内联在 `PiBridgeInstaller` 中，安装目标是
+pi 侧 extension 源码是资源文件 `src/main/resources/bridge/pi-launcher-bridge.ts`，
+由 `PiBridgeInstaller` 替换 `@EXTENSION_VERSION@` 后安装到
 `~/.pi/agent/extensions/pi-launcher-bridge.ts`（用户信任目录，只写自己那一个文件，勿动其他文件）。
 
 ## 核心设计（详见 docs/tasks/）
@@ -38,8 +39,21 @@ pi 侧 extension 源码以 Kotlin 常量内联在 `PiBridgeInstaller` 中，安�
 
 ## 构建与验证
 
-- **不要主动在本地构建**（`./gradlew build` / `compileKotlin` 等）：IDEA 插件构建成本高，改完直接 commit + push，由 GitHub Actions 构建验证
+- **不要主动在本地构建**（`./gradlew build` / `compileKotlin` 等）：IDEA 插件构建成本高；日常改动提交到 `dev`，需要 CI 验证时再按下面的规则合 `main` 或打 tag
 - 本地最多做静态检查（读代码、对拍 pi 文档），编译问题交给 CI
+
+## 分支、CI 与发布
+
+- 日常开发在 `dev` 分支进行；`main` 保持可发布状态。
+- 向 `dev` push **不会触发 GitHub Actions**（workflow 只监听 `main` push、`v*` tag push，以及指向 `main` 的 PR）。
+- 需要 CI/构建验证时：
+  - 把 `dev` 合并到 `main` 并 push `main`，触发 Build and Release；
+  - 或由用户明确授权后 push `v*` tag，触发构建、GitHub Release 与 Marketplace 发布。
+- 未经用户明确要求，不自行：
+  - 合并 `dev` → `main`
+  - 创建/移动 tag
+  - 修改 `build.gradle.kts` 的插件版本号
+- 发版前由用户安排严格内测；内测期间插件版本与所有 tag 保持在 `0.3.5`。
 
 ## 文档同步约定
 
