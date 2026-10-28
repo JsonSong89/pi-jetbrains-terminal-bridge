@@ -482,6 +482,7 @@ Rewind 是乐观更新：命令发送前面板历史已裁剪，如果 extension
   - working 会话显示 `●`；
   - 非 working 且 Terminal 不在 → 显示 `(closed)`；
   - closed 条目右侧显示 `×` 删除热区；点击删除不会选中/重启该会话，弹窗保持打开，方便批量删除。
+  - 会话多到出现弹窗滚动条时（IntelliJ 的弹窗滚动条浮在列表上），渲染和命中测试都按滚动条宽度留出右侧内缩，避免 `×` 被遮住或点不到。
 - 中部：用户消息卡片（时间 + 文本 + Rewind/Fork/Copy/Delete）。卡片只显示用户消息，不显示 AI 回复。
 - 底部：草稿输入 + Copy input / Append open workspace files / Send。
   - 每次键入都写回 `draft`；

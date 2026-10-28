@@ -61,6 +61,7 @@ import javax.swing.JComponent
 import javax.swing.JLabel
 import javax.swing.JList
 import javax.swing.JPanel
+import javax.swing.JScrollPane
 import javax.swing.KeyStroke
 import javax.swing.ScrollPaneConstants
 import javax.swing.SwingUtilities
@@ -710,6 +711,22 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
         comboDeleteClickInstalled = true
     }
 
+    /**
+     * Width the combo popup's overlay scrollbar paints over the list cells.
+     *
+     * IntelliJ renders the popup's vertical scrollbar on top of the list, so a
+     * long conversation list would hide the per-item `×` delete hotspot behind
+     * it. Scrollbars that take layout space already narrow the list, so they
+     * need no extra inset; only the overlay case is handled here.
+     */
+    private fun comboPopupScrollBarInset(list: JList<*>): Int {
+        val scroll = SwingUtilities.getAncestorOfClass(JScrollPane::class.java, list) as? JScrollPane ?: return 0
+        val bar = scroll.verticalScrollBar ?: return 0
+        if (!bar.isVisible) return 0
+        if (list.width < scroll.width - JBUI.scale(2)) return 0
+        return bar.preferredSize.width.coerceAtLeast(JBUI.scale(8))
+    }
+
     private fun deleteHitIndex(list: JList<*>, e: MouseEvent): Int {
         val index = list.locationToIndex(e.point)
         if (index < 0) return -1
@@ -717,7 +734,8 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
         if (conversations.isTerminalAlive(conversation.id)) return -1
         val cell = list.getCellBounds(index, index) ?: return -1
         if (!cell.contains(e.point)) return -1
-        if (e.x < cell.x + cell.width - JBUI.scale(COMBO_DELETE_HIT_PX)) return -1
+        val right = cell.x + cell.width - comboPopupScrollBarInset(list)
+        if (e.x < right - JBUI.scale(COMBO_DELETE_HIT_PX)) return -1
         return index
     }
 
@@ -755,7 +773,6 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
             isOpaque = true
             add(title, BorderLayout.CENTER)
             add(deleteHint, BorderLayout.EAST)
-            border = JBUI.Borders.empty(2, 6)
         }
 
         override fun getListCellRendererComponent(
@@ -793,6 +810,8 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
             val normalFg = if (conversation != null && !alive && !working) JBColor.GRAY else list.foreground
             background = if (isSelected) selectedBg else normalBg
             title.foreground = if (isSelected) selectedFg else normalFg
+            // Keep the delete hotspot clear of the popup's overlay scrollbar.
+            border = JBUI.Borders.empty(2, 6, 2, 6 + comboPopupScrollBarInset(list))
             return this
         }
     }
