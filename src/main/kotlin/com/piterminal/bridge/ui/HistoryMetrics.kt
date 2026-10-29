@@ -64,9 +64,10 @@ internal object HistoryMetrics {
         val attributed = AttributedString(text.substring(start, end))
         attributed.addAttribute(TextAttribute.FONT, font)
         val measurer = LineBreakMeasurer(attributed.iterator, BreakIterator.getLineInstance(), fontRenderContext)
+        val textLength = end - start
         val limit = width.toFloat()
         var lines = 0
-        while (measurer.position < attributed.length) {
+        while (measurer.position < textLength) {
             if (measurer.nextLayout(limit) == null) break
             lines++
             if (lines >= MAX_LINES) break
