@@ -39,14 +39,27 @@ pi 侧 extension 源码是资源文件 `src/main/resources/bridge/pi-launcher-br
 
 ## 构建与验证
 
-- **不要主动在本地构建**（`./gradlew build` / `compileKotlin` 等）：IDEA 插件构建成本高；日常改动提交到 `dev`，需要 CI 验证时再按下面的规则合 `main` 或打 tag
+- **不要主动在本地构建**（`./gradlew build` / `compileKotlin` 等）：IDEA 插件构建成本高；日常改动提交到 `dev`，需要编译验证时按下一节手动触发 `dev` 的 CI 构建
 - 本地最多做静态检查（读代码、对拍 pi 文档），编译问题交给 CI
 
 ## 分支、CI 与发布
 
 - 日常开发在 `dev` 分支进行；`main` 保持可发布状态。
-- 向 `dev` push **不会触发 GitHub Actions**（workflow 只监听 `main` push、`v*` tag push，以及指向 `main` 的 PR）。
-- 需要 CI/构建验证时：
+- `dev` 是用户的测试分支：**不改插件版本号、不走 publish**。`build.gradle.kts` 的版本与 tag 只在发版流程里动。
+- 向 `dev` push **不会自动触发 GitHub Actions**（workflow 只监听 `main` push、`v*` tag push，以及指向 `main` 的 PR）。
+- 需要验证 `dev` 能否编译时，用 `workflow_dispatch` 手动触发一次构建（只编译 + 跑 bridge 单测 + 上传 artifact，不出 Release、不发 Marketplace，因为 `build.yml` 里建 Release 的步骤只在 `refs/tags/v*` 下执行，`publish.yml` 只监听 `release: created`）：
+
+  ```bash
+  # 仓库已存 GitHub 凭据，可直接复用（scope: repo, workflow）
+  export GH_TOKEN=$(grep '@github.com' ~/.git-credentials | sed -E 's#https://[^:]*:([^@]*)@github.com.*#\1#')
+
+  gh workflow run build.yml --ref dev --repo JsonSong89/pi-jetbrains-terminal-bridge
+  gh run list --repo JsonSong89/pi-jetbrains-terminal-bridge --limit 1
+  gh run view --log-failed --repo JsonSong89/pi-jetbrains-terminal-bridge   # 失败时看编译错
+  ```
+
+  也可以用 GitHub 页面：Actions → Build and Release → Run workflow → 分支选 `dev`。注意 `gh auth status` 会因 token 缺 `read:org` 报错，但 `gh workflow run` 可用。
+- 需要正式 CI/发布验证时：
   - 把 `dev` 合并到 `main` 并 push `main`，触发 Build and Release；
   - 或由用户明确授权后 push `v*` tag，触发构建、GitHub Release 与 Marketplace 发布。
 - 未经用户明确要求，不自行：
