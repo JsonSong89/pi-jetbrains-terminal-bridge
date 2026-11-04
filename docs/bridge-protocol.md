@@ -1,6 +1,6 @@
 # IDEA Bridge ↔ pi extension 通信协议
 
-**状态：v2 设计规范，尚未实现。** 当前代码仍运行 v1 单向事件。本文面向后续开发者；MUST/必须为契约要求，建议参数可以调节但不得改变语义。
+**状态：v2 首期代码已实现，尚待 CI / 真实 TUI / IDE 集成验收。** 公共通道、快照、rewind 与通用 handoff 契约已接入；面板 Fork 仍走旧流程，不属于已迁移能力。本文面向开发者；MUST/必须为契约要求，建议参数可以调节但不得改变语义。
 
 关联方案：[双向操作通道与回退确认](plans/2026-11-04-2114——双向操作通道与回退确认.md)。
 
@@ -138,6 +138,17 @@ source
 
 建议完整快照发送节点：握手完成、重连、操作终态、session 变化、显式 `session.snapshot`。高频流事件先合并；第一版不设计增量一致性算法。
 
+首期 method registry：
+
+| method/version | 参数 | 结果与副作用 |
+|---|---|---|
+| `session.snapshot/1` | `{}` | 只读全量快照，可重新请求 |
+| `conversation.rewind/1` | `{targetEntryId}` | pi 1.5.0 / session v3；非 busy、完整稳定观察、目标 parent 安全才执行；终态含目标 id 和快照 |
+| `operation.reconcile/1` | `{operationIds:[...]}`（1–128 个唯一 id） | 耐久的日志元数据操作；只在这些执行已确认结束时解除运行时锁；返回相同 id 列表和当前快照；不执行原请求、不把其未知结果改写为成功 |
+
+对账响应可附 `executionEnded:true`。它不是执行成功状态，也不能凭新 hello / runtimeId 改变 / lease 释放推断：必须有原 executor 返回后持久化的 `.ended` 证据、耐久终态，或已确认原进程不再存在。仍在展开的同进程 reload 回调没有上述证据时不可对账；handoff ticket 未完成时也不可对账。原日志丢失仍返回 NOT_FOUND，不产生结束证据。
+
+
 ## 5. 操作运行时与 pi 适配器
 
 公共 registry 的描述包括 method/version、schema、资源锁、前置核验、executor、后置核验；只读方法不申请修改锁。锁绑定稳定资源 tabKey，session 替换不能释放在途锁。
@@ -198,4 +209,12 @@ v2 接管 tab 的 session 绑定与快照后，旧 v1 session_changed/stopped �
 
 参考本机 pi 1.5.0 的 `docs/rpc.md`、`docs/session-format.md`、`docs/extensions.md` 及对应分发/导航源码。未据此声称其他版本兼容。
 
-实施前必须锁定实际支持版本，确认 snapshot 的公开字段、分支 fingerprint、一致性采集、资源预算和日志保留参数。方案验收完成前，本协议仍是设计规范，不应在用户文档中宣称已支持。
+实施基线锁定为 pi **1.5.0** 的交互式 TUI 与原生 session v3。其他 pi 版本不声明 `conversation.rewind`，probe 未完成/失败不声明操作能力。单元契约与真实 TUI smoke 是不同验证层；未执行 smoke 不能声称真实 TUI 兼容已通过。
+
+首期参数：单帧默认 32 MiB、发送队列默认 64 MiB（最多 128 帧）、extension 待处理帧最多 128 个；IDE socket reader 等待后台消费，快照与 UI 通知分别合并。extension 以 `PI_BRIDGE_MAX_FRAME_BYTES` / `PI_BRIDGE_MAX_QUEUE_BYTES` / `PI_BRIDGE_MAX_JOURNAL_BYTES` 配置预算；IDE 以 `pi.bridge.maxFrameBytes` / `pi.bridge.maxQueueBytes` / `pi.bridge.maxJournalBytes` 系统属性配置。两端日志默认各 512 MiB。
+
+IDE 日志位于 IDE system 目录的 `pi-terminal-bridge/<project-hash>/local`；extension 日志位于同一 project 目录的 `remote/<tab-hash>`，通过 `PI_LAUNCHER_JOURNAL_DIR` 注入。均不写 pi session tree，token 不落盘。快照证据经 ack 后可去掉，IDE 成功提交后保留最近业务 checkpoint 与所有终态 tombstone；未决记录不自动淘汰。预算耗尽、损坏/无法取得 lease 时拒绝修改；不自动删日志来解锁。
+
+snapshotId 覆盖 runtimeId、事件代数及完整原生 session/header/file/branch/公开状态；缓存最多 16 个观察凭据。采集前后对拍，不能只比较 leafId。首期 rewind 在导航前拒绝无 parent、parent 是 user 或 custom_message 的目标，避免多退或改变 TUI 编辑器；安全 parent 的未回复消息可以处理。
+
+验证入口：`node --test tests/bridge-extension.test.mjs`（真实资源的运行时/故障契约）、Gradle `test`（framing、快照、投影、业务提交前置条件）、`PI_BINARY=/path/to/pi python3 tests/bridge-tui-smoke.py`（隔离配置的 PTY + 真实 pi 1.5.0）。CI 手动触发可勾选 `tui_smoke`；默认构建会执行 Node/JVM 契约测试。源码交付不等于这些验证已通过。

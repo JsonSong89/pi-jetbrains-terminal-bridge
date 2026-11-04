@@ -98,6 +98,14 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
         Collections.newSetFromMap(IdentityHashMap<PiUserMessage, Boolean>())
     private val inputArea = JBTextArea()
     private val sendButton = JButton("Send")
+    private val reconcileButton = JButton("Sync").apply {
+        toolTipText = "Refresh Pi state or reconcile a confirmed operation result"
+        addActionListener { conversations.active()?.let { conversations.reconcileOperation(it.id) } }
+    }
+    private val recoveryButton = JButton("Restore text").apply {
+        toolTipText = "Append the saved rewind text to your draft"
+        addActionListener { conversations.active()?.let { conversations.restoreRecoveryText(it.id) } }
+    }
     private val copyInputButton = JButton(AllIcons.Actions.Copy).apply {
         toolTipText = "Copy input to clipboard"
     }
@@ -225,7 +233,13 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
 
         val header = JPanel(BorderLayout()).apply {
             add(top, BorderLayout.NORTH)
-            add(statusLabel, BorderLayout.SOUTH)
+            add(JPanel(BorderLayout()).apply {
+                add(statusLabel, BorderLayout.CENTER)
+                add(JPanel(FlowLayout(FlowLayout.RIGHT, 4, 0)).apply {
+                    add(recoveryButton)
+                    add(reconcileButton)
+                }, BorderLayout.EAST)
+            }, BorderLayout.SOUTH)
         }
 
         historyList.apply {
@@ -398,12 +412,15 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
             val currentModel = active?.let { conversations.currentModel(it.id) }
             statusLabel.text = when {
                 active == null -> "No active conversation"
+                conversations.operationStatus(active.id) != null -> "${active.title} · ${conversations.operationStatus(active.id)}"
                 working -> "${active.title} · agent working${currentModel?.let { " · $it" } ?: ""}"
                 alive -> "${active.title} · terminal running${currentModel?.let { " · $it" } ?: ""}"
                 else -> "${active.title} · terminal closed"
             }
             val hasActive = active != null
-            sendButton.isEnabled = hasActive
+            sendButton.isEnabled = hasActive && !conversations.hasPendingOperation(active!!.id)
+            reconcileButton.isEnabled = hasActive
+            recoveryButton.isVisible = !active?.recoveryText.isNullOrEmpty()
             copyInputButton.isEnabled = hasActive
             copyWorkspaceButton.isEnabled = hasActive
             inputArea.isEnabled = hasActive

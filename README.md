@@ -46,10 +46,10 @@ IDEA (PiBridgeServer, loopback TCP + token)
 Terminal tab  ──  ~/.pi/agent/extensions/pi-launcher-bridge.ts (lazy-installed, content-compared)
 ```
 
-- The extension is installed on first terminal launch and reports `session_changed`, `agent_state`, `model_changed`, `file_modified` (from `tool_result`, when the file is actually written).
-- The plugin injects the session id at launch; `/new`-style runtime rebinds arrive as `session_changed` and archive the previous session.
-- Protocol: `{v, seq, type, tabKey, token, data}` — one JSON object per line, de-dup per `(tabKey, type)`, unknown types dropped, version mismatches dropped loudly.
-- Everything is best-effort: if the bridge dies, conversations still work via manual resume.
+- The managed extension (VERSION **8**) runs in the same interactive TUI process. A v2 authenticated connection carries requests, results and full native active-branch snapshots; it never starts a second pi process or uses RPC mode.
+- Rewind requires the verified API baseline **pi 1.5.0 / session v3**, a successful command-dispatch probe and an advertised capability. Unsupported versions keep control actions disabled. This development implementation still needs CI, real TUI and IDE acceptance.
+- Rewind requests are saved and sent once. Disconnects and timeouts preserve the panel and query the original request id; reconnect never replays a modification. `Sync` can reconcile confirmed current state after the old execution is known to have ended.
+- Working/model/file notifications and panel Fork still use the legacy v1 path. Once v2 owns a tab, delayed v1 session events cannot rebind it. See the [protocol](docs/bridge-protocol.md) for developer contracts.
 
 ## Usage
 
@@ -92,19 +92,35 @@ Checks are read-only and never rewrite the TUI input.
 This panel action deliberately differs from native `/fork`'s default edit-before
 behavior.
 
-The **Rewind** button (undo icon, left of Fork) calls `navigateTree` on the
-selected user message's **parent** in the same session — no new session, no
-terminal restart. The selected message itself and everything after it leave
-the active branch and model context. Only the IDEA input is pre-filled with
-the selected text for editing; the TUI editor is not pre-filled. Tree entries
-remain in the jsonl. Rewinding the first entry without a parent is currently
-unsupported and reports a warning.
+The **Rewind** button (undo icon, left of Fork) uses the bidirectional bridge to
+navigate within the same session. It keeps the panel unchanged until pi confirms
+the result and the full branch snapshot passes validation. The selected user
+message and later turns leave the active branch; the tree entries remain in the
+jsonl. No rewind command is pasted into the Terminal editor.
 
-Bridge command regression tests (no IDE or Gradle build required):
-`node --test tests/bridge-extension.test.mjs`. CI runs these against the actual
-packaged resource before building. Extension VERSION stays **6** before tagging;
-installation compares full file contents, and updated code takes effect in a
-newly opened Pi terminal.
+Rewind is rejected while pi is busy, for a root message without a parent, or
+when the parent is another user/custom message: those targets could otherwise
+move to the wrong point or change the TUI editor. If you edit the IDEA draft
+while waiting, it is preserved and the selected text is available through
+**Restore text**. **Sync** refreshes state, or explicitly reconciles unresolved
+results once execution is confirmed ended; it never repeats the rewind.
+
+Cards are bound to native session/entry ids. Removing a card stores a local
+hidden record, so later snapshots keep it hidden. Ambiguous old cards stay
+unbound and cannot be rewound. The first migration preserves the old panel's
+visibility; older messages that were only in the TUI may stay hidden in the
+panel, while new TUI messages appear after initialization.
+
+Panel **Fork** retains its legacy CLI copy + one Terminal command workflow;
+it has not migrated to v2 and can still leave an untrimmed copy after failure.
+
+Validation entry points: `node --test tests/bridge-extension.test.mjs`, Gradle
+`test`, and the opt-in real TUI smoke
+`PI_BINARY=/path/to/pi python3 tests/bridge-tui-smoke.py`. CI can run the smoke
+through the `tui_smoke` workflow input. These checks still need to be run for
+this refactor; source delivery does not establish compatibility. Installation
+compares full resource contents, and updated code loads in a new Pi Terminal
+or after pi `/reload`.
 
 In short: the IDE panel gives you structure (persistent list, working badges,
 archived sessions, click-to-resume), the TUI gives you pi's full interactive
@@ -134,7 +150,9 @@ Defaults — rebindable in **Settings → Keymap → "Pi Terminal Bridge"**:
 ## Build
 
 ```bash
-node --test tests/bridge-extension.test.mjs   # bridge extension command handlers (fast, no Gradle)
+node --test tests/bridge-extension.test.mjs   # packaged extension and fault contracts
+./gradlew test         # JVM protocol/projection/commit contracts
+PI_BINARY=/path/to/pi python3 tests/bridge-tui-smoke.py  # opt-in real pi 1.5.0 PTY smoke
 ./gradlew build        # verify
 ./gradlew runIde       # sandbox IDE
 ./gradlew buildPlugin  # distributable zip

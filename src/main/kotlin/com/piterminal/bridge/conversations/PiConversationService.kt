@@ -12,6 +12,9 @@ import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VfsUtil
 import com.intellij.openapi.wm.ToolWindowManager
 import com.piterminal.bridge.PiBridgeUi
+import com.google.gson.JsonObject
+import com.piterminal.bridge.bridge.BridgeOperations
+import com.piterminal.bridge.bridge.SessionSnapshot
 import com.piterminal.bridge.bridge.PiBridgeServer
 import com.piterminal.bridge.services.PiStatusWidget
 import com.piterminal.bridge.services.PiTerminalService
@@ -33,6 +36,37 @@ import java.util.concurrent.CopyOnWriteArrayList
 class PiConversationService(private val project: Project) {
 
     private val logger = Logger.getInstance(PiConversationService::class.java)
+    private val operations by lazy { ConversationOperations(project, this) }
+    private val bridge get() = BridgeOperations.getInstance(project)
+
+    fun operationStatus(id: String): String? = bridge.status(id)
+    fun hasPendingOperation(id: String): Boolean = bridge.locked(id)
+    fun reconcileOperation(id: String): Boolean = operations.reconcile(id)
+    fun restoreRecoveryText(id: String) {
+        val c = get(id) ?: return
+        if (c.recoveryText.isEmpty()) return
+        c.draft = mergeDraft(c.draft, c.recoveryText, true)
+        c.recoveryText = ""; c.draftRevision++
+        saveOperationView(id, draft = true)
+    }
+    fun onBridgeOperation(record: JsonObject) = operations.receive(record)
+    fun onBridgeOperationState(tabKey: String) = operationChanged(tabKey)
+    internal fun operationChanged(id: String) = notifyListeners(ChangeEvent(ChangeKind.STATE, id))
+    internal fun saveOperationView(id: String, draft: Boolean = false) {
+        persist()
+        notifyListeners(ChangeEvent(if (draft) ChangeKind.DRAFT_APPENDED else ChangeKind.STRUCTURE, id))
+    }
+    fun onBridgeSnapshot(tabKey: String, snapshot: SessionSnapshot) {
+        val c = get(tabKey) ?: return
+        // Observations during UNKNOWN are diagnostic only, never implicit operation success.
+        if (bridge.locked(tabKey)) { operationChanged(tabKey); return }
+        onBridgeSessionChanged(tabKey, snapshot.sessionId, "v2")
+        if (operations.project(c, snapshot)) saveOperationView(tabKey)
+        val working = snapshot.raw.getAsJsonObject("state").get("idle")?.asBoolean != true
+        synchronized(workingIds) { if (working) workingIds.add(tabKey) else workingIds.remove(tabKey) }
+        operationChanged(tabKey)
+        PiStatusWidget.update(project)
+    }
 
     fun interface Listener {
         fun onChanged(event: ChangeEvent)
@@ -57,6 +91,7 @@ class PiConversationService(private val project: Project) {
     private var activeId: String? = null
     /** Agent working state per conversation id (bridge agent_state). */
     private val workingIds = mutableSetOf<String>()
+    private val telemetryWorkingIds = mutableSetOf<String>()
     /** Tabs whose pi session id was confirmed by the bridge at least once. */
     private val boundTabs = mutableSetOf<String>()
     /** Latest model per conversation id (bridge model_changed). */
@@ -142,6 +177,10 @@ class PiConversationService(private val project: Project) {
      */
     fun forkConversation(id: String, messageIndex: Int): PiConversation? {
         val source = get(id) ?: return null
+        if (bridge.locked(id)) {
+            showNotification("Resolve the pending operation before forking this conversation.", NotificationType.WARNING)
+            return null
+        }
         if (messageIndex !in source.messages.indices) return null
         if (PiBridgeServer.getInstance(project).endpoint() == null) {
             showNotification(
@@ -171,7 +210,8 @@ class PiConversationService(private val project: Project) {
             // Keep history up to and including the forked message; nothing
             // after it, and nothing pre-filled — fork continues from that
             // point, the user types the next question.
-            messages = source.messages.subList(0, messageIndex + 1).toMutableList()
+            messages = source.messages.subList(0, messageIndex + 1).toMutableList(),
+            projectionInitialized = true
         )
         synchronized(conversations) {
             conversations[conversation.id] = conversation
@@ -220,6 +260,10 @@ class PiConversationService(private val project: Project) {
     }
 
     fun deleteConversation(id: String) {
+        if (bridge.locked(id)) {
+            showNotification("This conversation has an unresolved operation; retain it for result queries.", NotificationType.WARNING)
+            return
+        }
         val removed = synchronized(conversations) {
             val conversation = conversations.remove(id) ?: return
             if (activeId == id) {
@@ -255,6 +299,7 @@ class PiConversationService(private val project: Project) {
         val conversation = get(id) ?: return
         if (conversation.draft == draft) return
         conversation.draft = draft
+        conversation.draftRevision++
         persist()
     }
 
@@ -262,6 +307,7 @@ class PiConversationService(private val project: Project) {
         val conversation = ensureActiveConversation()
         val next = mergeDraft(conversation.draft, text, block)
         conversation.draft = if (next.endsWith("\n")) next else next + "\n"
+        conversation.draftRevision++
         persist()
         showToolWindow(focus = true)
         notifyListeners(ChangeEvent(ChangeKind.DRAFT_APPENDED, conversation.id))
@@ -270,6 +316,7 @@ class PiConversationService(private val project: Project) {
     fun appendWorkspaceFiles(paths: List<String>) {
         val conversation = ensureActiveConversation()
         conversation.draft = replaceWorkspaceBlock(conversation.draft, formatWorkspaceBlock(paths))
+        conversation.draftRevision++
         persist()
         showToolWindow(focus = true)
         notifyListeners(ChangeEvent(ChangeKind.DRAFT_APPENDED, conversation.id))
@@ -277,6 +324,10 @@ class PiConversationService(private val project: Project) {
 
     fun sendDraft(): Boolean {
         val conversation = active() ?: return false
+        if (bridge.locked(conversation.id)) {
+            showNotification("Rewind is unresolved. Your draft is saved; wait for its result or reconcile before sending.", NotificationType.WARNING)
+            return false
+        }
         val text = conversation.draft.trim()
         if (text.isEmpty()) return false
 
@@ -292,7 +343,9 @@ class PiConversationService(private val project: Project) {
 
         terminal().sendText(conversation.id, text)
         conversation.messages.add(PiUserMessage(text))
+        conversation.viewRevision++
         conversation.draft = ""
+        conversation.draftRevision++
         persist()
         terminal().selectTab(conversation.id, requestFocus = false)
         notifyListeners(ChangeEvent(ChangeKind.SENT, conversation.id))
@@ -302,7 +355,11 @@ class PiConversationService(private val project: Project) {
     fun deleteMessage(conversationId: String, index: Int): Boolean {
         val conversation = get(conversationId) ?: return false
         if (index !in conversation.messages.indices) return false
-        conversation.messages.removeAt(index)
+        val removed = conversation.messages.removeAt(index)
+        if (removed.entryId != null && removed.sessionId != null) {
+            conversation.hiddenEntries.add(ConversationOperations.key(removed.sessionId, removed.entryId))
+        } else conversation.hiddenLegacy.add(removed)
+        conversation.viewRevision++
         persist()
         notifyListeners(ChangeEvent(ChangeKind.STRUCTURE, conversationId))
         return true
@@ -396,6 +453,7 @@ class PiConversationService(private val project: Project) {
             return
         }
         if (conversation.piSessionId == sessionId) {
+            synchronized(boundTabs) { boundTabs.add(tabKey) }
             // Id already matches (typical launch: we passed --session-id and pi
             // echoed it). Still dispatch a pending fork command if one waits —
             // the id check above would otherwise swallow it and the session
@@ -445,9 +503,17 @@ class PiConversationService(private val project: Project) {
             piSessionId = previousSessionId,
             createdAt = conversation.createdAt,
             messages = conversation.messages.toMutableList(),
-            draft = ""
+            draft = "",
+            viewRevision = conversation.viewRevision,
+            hiddenEntries = conversation.hiddenEntries.toMutableSet(),
+            hiddenLegacy = conversation.hiddenLegacy.toMutableList(),
+            projectionInitialized = conversation.projectionInitialized
         )
         conversation.piSessionId = sessionId
+        if (PiBridgeServer.getInstance(project).owns(tabKey)) {
+            conversation.messages.clear()
+            conversation.viewRevision++
+        }
         synchronized(conversations) {
             // Keep insertion order stable: archived right before the live tab.
             val reordered = LinkedHashMap<String, PiConversation>()
@@ -465,6 +531,7 @@ class PiConversationService(private val project: Project) {
 
     fun onBridgeSessionStopped(tabKey: String) {
         synchronized(workingIds) { workingIds.remove(tabKey) }
+        synchronized(telemetryWorkingIds) { telemetryWorkingIds.remove(tabKey) }
         notifyListeners(ChangeEvent(ChangeKind.STRUCTURE, tabKey))
         PiStatusWidget.update(project)
     }
@@ -472,11 +539,12 @@ class PiConversationService(private val project: Project) {
     fun onBridgeAgentState(tabKey: String, state: String, stopReason: String? = null) {
         val conversation = get(tabKey) ?: return
         val working = state == "working"
-        val becameIdle = synchronized(workingIds) {
-            val wasWorking = tabKey in workingIds
-            if (working) workingIds.add(tabKey) else workingIds.remove(tabKey)
+        val becameIdle = synchronized(telemetryWorkingIds) {
+            val wasWorking = tabKey in telemetryWorkingIds
+            if (working) telemetryWorkingIds.add(tabKey) else telemetryWorkingIds.remove(tabKey)
             wasWorking && !working
         }
+        synchronized(workingIds) { if (working) workingIds.add(tabKey) else workingIds.remove(tabKey) }
         notifyListeners(ChangeEvent(ChangeKind.STATE, tabKey))
         PiStatusWidget.update(project)
         if (becameIdle && PiSettings.getInstance().state.notifyOnAgentEnd && !PiBridgeUi.isIdeActive(project)) {
@@ -551,44 +619,8 @@ class PiConversationService(private val project: Project) {
 
     // ---- internals ----
 
-    /**
-     * Rewinds the active branch of [id] back to user message [messageIndex]
-     * using pi's navigateTree (the same semantics as selecting the message in
-     * `/tree`): same session, same conversation — everything after the message
-     * (it included, plus the AI reply) leaves the active branch and thus the
-     * model context. The message text is put back in the panel's draft, like
-     * /tree returning the text to the editor, so it can be edited and re-sent.
-     * Needs a live terminal and the bridge channel.
-     */
-    fun rewindConversation(id: String, messageIndex: Int): Boolean {
-        val conversation = get(id) ?: return false
-        if (messageIndex !in conversation.messages.indices) return false
-        if (PiBridgeServer.getInstance(project).endpoint() == null) {
-            showNotification(
-                "The Pi bridge channel is unavailable; rewinding needs it. " +
-                    "Check the Terminal shell (PowerShell / POSIX, not cmd.exe).",
-                NotificationType.WARNING
-            )
-            return false
-        }
-        if (!terminal().isAlive(conversation.id)) {
-            showNotification(
-                "${conversation.title} terminal is closed; restore it first, then rewind.",
-                NotificationType.WARNING
-            )
-            return false
-        }
-        val text = conversation.messages[messageIndex].text
-        // messages is a constructor val: trim in place instead of reassigning.
-        conversation.messages.subList(messageIndex, conversation.messages.size).clear()
-        conversation.draft = text
-        persist()
-        val encoded = base64(text)
-        terminal().sendText(conversation.id, "/bridge-rewind $messageIndex $encoded")
-        notifyListeners(ChangeEvent(ChangeKind.STRUCTURE, conversation.id))
-        notifyListeners(ChangeEvent(ChangeKind.DRAFT_APPENDED, conversation.id))
-        return true
-    }
+    /** Rewind is committed only from a verified operation result and full pi snapshot. */
+    fun rewindConversation(id: String, messageIndex: Int): Boolean = operations.rewind(id, messageIndex)
 
     /** Once pi boots (first bind), send the fork command once and observe its result. */
     private fun schedulePendingForkCommand(conversationId: String) {
@@ -668,7 +700,14 @@ class PiConversationService(private val project: Project) {
                     piSessionId = s.piSessionId,
                     createdAt = s.createdAt,
                     messages = s.messages.toMutableList(),
-                    draft = s.draft
+                    draft = s.draft,
+                    draftRevision = s.draftRevision,
+                    viewRevision = s.viewRevision,
+                    hiddenEntries = s.hiddenEntries.toMutableSet(),
+                    hiddenLegacy = s.hiddenLegacy.toMutableList(),
+                    recoveryText = s.recoveryText,
+                    appliedOperations = s.appliedOperations.toMutableSet(),
+                    projectionInitialized = s.projectionInitialized
                 )
             }
             activeId = store().activeId()?.takeIf { conversations.containsKey(it) }

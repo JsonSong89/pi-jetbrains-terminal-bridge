@@ -16,6 +16,7 @@ import com.intellij.ui.content.ContentManagerEvent
 import com.intellij.ui.content.ContentManagerListener
 import com.piterminal.bridge.PiBridgeUi
 import com.piterminal.bridge.bridge.PiBridgeInstaller
+import com.piterminal.bridge.bridge.BridgeOperations
 import com.piterminal.bridge.bridge.PiBridgeServer
 import com.piterminal.bridge.settings.PiSettings
 import com.intellij.openapi.util.SystemInfo
@@ -263,6 +264,7 @@ class PiTerminalService(private val project: Project) : Disposable {
     ) {
         PiBridgeInstaller.ensureInstalled()
         val endpoint = PiBridgeServer.getInstance(project).ensureStarted()
+        val journalDirectory = BridgeOperations.getInstance(project).store.remoteDirectory(conversationId).toString()
 
         val settings = PiSettings.getInstance().state
         // Best-effort: prefer an explicit jsonl path so resume is unambiguous.
@@ -294,11 +296,13 @@ class PiTerminalService(private val project: Project) : Disposable {
                     append("\$env:PI_LAUNCHER_PORT='${endpoint.port}'; ")
                     append("\$env:PI_LAUNCHER_TOKEN='${endpoint.token}'; ")
                     append("\$env:PI_LAUNCHER_TAB_KEY='$conversationId'; ")
+                    append("\$env:PI_LAUNCHER_JOURNAL_DIR=${quote(journalDirectory)}; ")
                 } else {
                     // `env` prefix works in bash/zsh/fish alike, unlike VAR=val.
                     append("env PI_LAUNCHER_PORT=${endpoint.port} ")
                     append("PI_LAUNCHER_TOKEN='${endpoint.token}' ")
                     append("PI_LAUNCHER_TAB_KEY='$conversationId' ")
+                    append("PI_LAUNCHER_JOURNAL_DIR=${quote(journalDirectory)} ")
                 }
             }
 
