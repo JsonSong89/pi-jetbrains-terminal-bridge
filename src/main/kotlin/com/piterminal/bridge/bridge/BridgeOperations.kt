@@ -108,9 +108,9 @@ class BridgeOperations(private val project: Project) : Disposable {
     }
     fun disconnected(connection: BridgeConnection) = executor.execute {
         snapshots.remove(connection.tabKey)
-        records.values.filter { BridgeProtocol.string(it, "tabKey") == connection.tabKey && unresolved(it) }.forEach {
-            it.addProperty("observation", "disconnected")
-            runCatching { saveAndPublish(it) }.onFailure { publish(it) }
+        records.values.filter { BridgeProtocol.string(it, "tabKey") == connection.tabKey && unresolved(it) }.forEach { record ->
+            record.addProperty("observation", "disconnected")
+            runCatching { saveAndPublish(record) }.onFailure { publish(record) }
         }
         onEdt { PiConversationService.getInstance(project).onBridgeOperationState(connection.tabKey) }
     }
