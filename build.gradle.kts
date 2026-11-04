@@ -55,6 +55,10 @@ tasks {
         enabled = false
     }
 
+    test {
+        testLogging { events("passed", "skipped", "failed") }
+    }
+
     signPlugin {
         certificateChain.set(System.getenv("CERTIFICATE_CHAIN"))
         privateKey.set(System.getenv("PRIVATE_KEY"))
