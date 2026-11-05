@@ -70,7 +70,7 @@ v2 快照是该 tab 会话绑定与分支投影的单一入口。agent 完成通
 - `hiddenEntries`（`sessionId:entryId`）与 `hiddenLegacy`；
 - `recoveryText`、`appliedOperations`、`projectionInitialized`。
 
-删除卡片只保存本地隐藏事实，不删除 pi entries。旧卡片按文本和顺序的唯一映射绑定，已有 entry 身份作为顺序锚点；歧义保留并提示，不能按 newest-first 猜。
+历史卡片只提供 Rewind / Fork / Copy；删除入口与 deleteMessage 服务方法已移除。旧本地隐藏记录继续兼容，不恢复已隐藏卡片。旧卡片按文本和顺序的唯一映射绑定，已有 entry 身份作为顺序锚点；歧义保留并提示，不能按 newest-first 猜。
 
 旧 XML 没有保存删除记录。首次 v2 迁移保留原面板可见性，把既未映射、又不属于歧义文本的旧原生用户条目标为本地隐藏；因此迁移前仅在 TUI 输入的历史也可能保持不显示，仍可在 TUI 查看。初始化后的新原生用户消息正常进入投影。这是保护旧删除操作的保守取舍。
 
@@ -88,11 +88,11 @@ v2 快照是该 tab 会话绑定与分支投影的单一入口。agent 完成通
 8. IDEA 先耐久保存结果再 ack；只有结果关联、快照证据、当前 session 和本地 view revision 全部满足时提交投影。
 9. 草稿 revision 未变则回填文本；已变则保留新输入，把旧文本放到 `Restore text`，点击追加到草稿。
 
-accepted/running 都不是成功。超时或断联只更新观察状态，并每 5s 按原 ID 查询。查询 NOT_FOUND 不代表未执行。UNKNOWN 时允许浏览、复制、隐藏卡片、编辑草稿和操作其他会话；同 tab 的发送、rewind、fork、删除会话受保护。
+accepted/running 都不是成功。超时或断联只更新观察状态，并每 5s 按原 ID 查询。查询 NOT_FOUND 不代表未执行。UNKNOWN 时允许浏览、复制、编辑草稿和操作其他会话；同 tab 的发送、rewind、fork、删除会话受保护。
 
 ## 6. 显式对账
 
-面板 `Sync` 在无未决操作时请求新快照；有未决时提交耐久的 `operation.reconcile/1` 元数据操作。它能同步已确认当前状态，但不会执行原请求，也不将原结果改成成功。
+面板状态由 bridge 自动同步，不再提供常驻 Sync 或状态行文字按钮。顶部统一 toolbar 仅在未决执行均已结束、当前完整快照与对账 capability 可用时显示 `Sync current session` 图标，提交耐久的 `operation.reconcile/1` 元数据操作。`Restore text` 仅有待恢复文本时显示为顶部图标；输入区 Workspace / Copy 使用统一无边框小图标。它能同步已确认当前状态，但不会执行原请求，也不将原结果改成成功。
 
 允许对账的结束证据：
 
@@ -133,7 +133,7 @@ ForkWorkflow 已使用通用交接：只捕获 ticket 配置和原生核验证�
 1. 源 tab 必须具备 fork capability、完整稳定快照、准确 user entryId，且没有未决操作或忙碌。
 2. 新目标继承完整源卡片视图和隐藏状态，草稿为空；没有提前 subList 裁剪。
 3. 在普通操作日志中先保存 `preparing` reservation（还没有 request），内容包括目标身份/初始视图、源原生文件路径、目标 entryId 与完整 turn branch。
-4. 耐久发布后只启动一次目标 Terminal：`--fork <原生文件完整路径> --session-id <目标id>`。等待快照/能力事件，不用延迟或轮询 session id。准备期点击 Sync 可停止并保留副本；点击/恢复不会另起目标进程。
+4. 耐久发布后只启动一次目标 Terminal：`--fork <原生文件完整路径> --session-id <目标id>`。等待快照/能力事件，不用延迟或轮询 session id。准备期点击顶部 Stop fork preparation 图标可停止并保留副本；点击/恢复不会另起目标进程。
 5. 目标快照核对原生 turn entries 前缀与源完全一致；只允许其后附带启动 session_info/model/thinking 元数据。复制身份变化、内容变化、busy 或不支持 capability 时不发修改请求。
 6. 同一 reservation id 一次性转成 `conversation.forkAtTurn/1`，参数 `{targetEntryId,turnLeafId}`，复用耐久 intent / 结果 / query。
 7. PiAdapter 在新鲜命令上下文重新核对观察/截止时间/完整 turn leaf。目标必须持久、无 label、TUI editor 为空；公开 API 的 label 重建与 callback 后清空 editor 行为决定这些前置限制。

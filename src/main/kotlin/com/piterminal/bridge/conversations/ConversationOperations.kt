@@ -103,7 +103,7 @@ class ConversationOperations(private val project: Project, private val service: 
             c.recoveryText = BridgeProtocol.string(business, "text").orEmpty()
             service.saveOperationView(tab)
             bridge.commit(id, "conflict", checkpoint(c))
-            warn("Pi reported a result, but the session or panel has moved on. The panel was preserved; use Sync to adopt the confirmed current state.")
+            warn("Pi reported a result, but the session or panel has moved on. The panel was preserved; use the toolbar's Sync current session action to adopt the confirmed current state.")
             return
         }
         project(c, after!!)
@@ -129,7 +129,7 @@ class ConversationOperations(private val project: Project, private val service: 
                 business.get("viewRevision").asLong, c.viewRevision)
         if (!valid) {
             bridge.commit(id, "conflict")
-            warn("Fork returned a result, but the copied session or panel has moved on. Use Sync to reconcile; the fork will not be repeated.")
+            warn("Fork returned a result, but the copied session or panel has moved on. Use the toolbar's Sync current session action to reconcile; the fork will not be repeated.")
             return
         }
         service.adoptForkSession(c, after!!.sessionId)
@@ -139,15 +139,29 @@ class ConversationOperations(private val project: Project, private val service: 
         bridge.commit(id, "applied", checkpoint(c))
     }
 
+    private fun unresolvedRecords(tab: String): List<JsonObject> = bridge.recordsFor(tab).filter {
+        BridgeProtocol.string(it, "localState") !in setOf("applied", "reconciled", "rejected", "not_sent")
+    }
+
+    private fun executionEnded(record: JsonObject): Boolean {
+        val response = record.getAsJsonObject("response") ?: return false
+        return BridgeProtocol.terminal(response) || response.get("executionEnded")?.asBoolean == true
+    }
+
+    /** Recovery is offered only when a current observation and ended executions make it actionable. */
+    fun canReconcile(tab: String): Boolean {
+        if (bridge.snapshot(tab)?.usable != true ||
+            PiBridgeServer.getInstance(project).connection(tab)?.supports("operation.reconcile") != true) return false
+        val records = unresolvedRecords(tab)
+        return records.isNotEmpty() && records.all(::executionEnded)
+    }
+
     /** A separate durable metadata operation confirms termination; it never reexecutes the old intent. */
     fun reconcile(tab: String): Boolean {
         val snapshot = bridge.snapshot(tab) ?: return warn("No current full snapshot is available yet.")
-        val records = bridge.recordsFor(tab).filter { BridgeProtocol.string(it, "localState") !in setOf("applied", "reconciled", "rejected", "not_sent") }
+        val records = unresolvedRecords(tab)
         if (records.isEmpty()) { bridge.requestSnapshot(tab); return true }
-        if (records.any { record ->
-            val response = record.getAsJsonObject("response")
-            response == null || (!BridgeProtocol.terminal(response) && response.get("executionEnded")?.asBoolean != true)
-        }) {
+        if (records.any { !executionEnded(it) }) {
             return warn("An old execution has not been confirmed ended. Queries will continue without releasing its lock.")
         }
         val c = service.get(tab) ?: return false
@@ -208,5 +222,4 @@ class ConversationOperations(private val project: Project, private val service: 
         service.saveOperationView(c.id)
     }
     private fun warn(text: String): Boolean { PiBridgeUi.notify(project, text, NotificationType.WARNING); return false }
-    companion object { fun key(sessionId: String, entryId: String): String = ConversationProjection.key(sessionId, entryId) }
 }

@@ -104,19 +104,9 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
         Collections.newSetFromMap(IdentityHashMap<PiUserMessage, Boolean>())
     private val inputArea = JBTextArea()
     private val sendButton = JButton("Send")
-    private val reconcileButton = JButton("Sync").apply {
-        toolTipText = "Refresh Pi state or reconcile a confirmed operation result"
-        addActionListener { conversations.active()?.let { conversations.reconcileOperation(it.id) } }
-    }
-    private val recoveryButton = JButton("Restore text").apply {
-        toolTipText = "Append the saved rewind text to your draft"
-        addActionListener { conversations.active()?.let { conversations.restoreRecoveryText(it.id) } }
-    }
-    private val copyInputButton = JButton(AllIcons.Actions.Copy).apply {
-        toolTipText = "Copy input to clipboard"
-    }
-    private val copyWorkspaceButton = JButton(AllIcons.General.OpenDisk).apply {
-        toolTipText = "Append open workspace files to input"
+    private val copyInputButton = iconButton(AllIcons.Actions.Copy, "Copy input to clipboard") { copyInputToClipboard() }
+    private val copyWorkspaceButton = iconButton(AllIcons.General.OpenDisk, "Append open workspace files to input") {
+        appendOpenWorkspaceFiles()
     }
     private val timeFormat = SimpleDateFormat("HH:mm")
     private companion object {
@@ -219,6 +209,8 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
                 add(NewConversationAction())
                 add(RenameConversationAction())
                 add(DeleteConversationAction())
+                add(RecoverOperationAction())
+                add(RestoreTextAction())
                 addSeparator()
                 add(CheckTerminalAction())
                 add(FocusTerminalAction())
@@ -239,13 +231,7 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
 
         val header = JPanel(BorderLayout()).apply {
             add(top, BorderLayout.NORTH)
-            add(JPanel(BorderLayout()).apply {
-                add(statusLabel, BorderLayout.CENTER)
-                add(JPanel(FlowLayout(FlowLayout.RIGHT, 4, 0)).apply {
-                    add(recoveryButton)
-                    add(reconcileButton)
-                }, BorderLayout.EAST)
-            }, BorderLayout.SOUTH)
+            add(statusLabel, BorderLayout.SOUTH)
         }
 
         historyList.apply {
@@ -328,8 +314,6 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
         installInputFileDrop()
 
         sendButton.addActionListener { sendDraft() }
-        copyInputButton.addActionListener { copyInputToClipboard() }
-        copyWorkspaceButton.addActionListener { appendOpenWorkspaceFiles() }
 
         val buttonRow = JPanel(BorderLayout()).apply {
             add(JPanel(FlowLayout(FlowLayout.LEFT, 4, 4)).apply {
@@ -426,7 +410,6 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
             }
             val hasActive = active != null
             sendButton.isEnabled = hasActive && !conversations.hasPendingOperation(active!!.id)
-            reconcileButton.isEnabled = hasActive
             val counts = active?.let { conversations.branchCounts(it.id) }
             if (counts == null) {
                 branchCountLabel.isVisible = false
@@ -438,7 +421,6 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
                 branchCountLabel.toolTipText =
                     "Active Pi branch · ${counts.users} user messages · ${counts.model} assistant/tool entries"
             }
-            recoveryButton.isVisible = !active?.recoveryText.isNullOrEmpty()
             copyInputButton.isEnabled = hasActive
             copyWorkspaceButton.isEnabled = hasActive
             inputArea.isEnabled = hasActive
@@ -829,15 +811,11 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
         val copy = iconButton(AllIcons.Actions.Copy, "Copy") {
             CopyPasteManager.getInstance().setContents(StringSelection(message.text))
         }
-        val delete = iconButton(AllIcons.General.Delete, "Remove this card from the panel (does not touch the Pi session)") {
-            conversations.deleteMessage(conversationId, index)
-        }
         val actions = JPanel(FlowLayout(FlowLayout.RIGHT, JBUI.scale(4), 0)).apply {
             isOpaque = false
             add(rewind)
             add(fork)
             add(copy)
-            add(delete)
         }
         val collapsed = isCollapsed(message)
         body.rows = if (collapsed) COLLAPSED_ROWS else expandedRows(message)
@@ -1279,6 +1257,42 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
             border = JBUI.Borders.empty(2, 6, 2, 6 + comboPopupScrollBarInset(list))
             return this
         }
+    }
+
+    private inner class RecoverOperationAction : AnAction(
+        "Sync current session", "Adopt the confirmed Pi state without repeating the operation", AllIcons.Actions.Refresh
+    ), DumbAware {
+        override fun actionPerformed(e: AnActionEvent) {
+            persistDraft()
+            conversations.active()?.let { conversations.reconcileOperation(it.id) }
+        }
+
+        override fun update(e: AnActionEvent) {
+            val action = conversations.active()?.let { conversations.operationRecovery(it.id) }
+            val preparing = action == PiConversationService.OperationRecovery.STOP_PREPARATION
+            e.presentation.isEnabledAndVisible = action != null
+            e.presentation.text = if (preparing) "Stop fork preparation" else "Sync current session"
+            e.presentation.description = if (preparing) "Stop preparing the fork and keep the copy" else
+                "Adopt the confirmed Pi state without repeating the operation"
+            e.presentation.icon = if (preparing) AllIcons.General.Remove else AllIcons.Actions.Refresh
+        }
+
+        override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.EDT
+    }
+
+    private inner class RestoreTextAction : AnAction(
+        "Restore text", "Append the saved rewind text to your draft", AllIcons.Actions.Undo
+    ), DumbAware {
+        override fun actionPerformed(e: AnActionEvent) {
+            persistDraft()
+            conversations.active()?.let { conversations.restoreRecoveryText(it.id) }
+        }
+
+        override fun update(e: AnActionEvent) {
+            e.presentation.isEnabledAndVisible = !conversations.active()?.recoveryText.isNullOrEmpty()
+        }
+
+        override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.EDT
     }
 
     private inner class NewConversationAction : AnAction("New Conversation", "Start a new Pi conversation", AllIcons.General.Add), DumbAware {

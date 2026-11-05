@@ -48,7 +48,7 @@ Terminal 标签页 ── ~/.pi/agent/extensions/pi-launcher-bridge.ts（懒安�
 
 - 托管 extension（VERSION **9**）仍运行在同一个交互式 TUI 进程里；v2 认证长连接传输请求、结果和完整原生活跃分支快照，不使用 RPC mode 或另起 pi 进程。
 - Rewind / Fork 的 API 基线锁定 **pi 1.5.0 / session v3**，还需通过内部命令 probe 并声明 capability；不支持的版本关闭控制操作。本轮 Fork 迁移仍待 CI、真实 TUI 和 IDE 集成验收。
-- 修改请求先落盘、只发送一次。断联和超时保留面板原状，只查询原 requestId；重连不重放修改。确认旧执行结束后，可用 `Sync` 显式对账当前状态。
+- 修改请求先落盘、只发送一次。断联和超时保留面板原状，只查询原 requestId；重连不重放修改。未决操作确认结束且可对账时，顶部才显示 **Sync current session** 图标。
 - working/model/写文件通知暂时保留 v1；Fork / Rewind 都经 v2 操作。v2 接管过的 tab 不会再被迟到的 v1 会话事件换绑。开发契约见[通信协议](docs/bridge-protocol.md)。
 
 ## 使用方式
@@ -81,7 +81,7 @@ Pi 标签页是**真实终端里跑着完整的 pi TUI** —— 所有斜杠命�
 新会话经耐久 handoff 确认完整分支后，面板才裁剪；中间副本不会归档成额外会话。
 
 Fork 会拒绝忙碌会话、有歧义的旧卡片、带 label 的会话，以及目标 TUI 输入框已有内容的情况。
-源 Terminal 和 IDEA 草稿保留。准备期间可点 **Sync** 停止并保留全量副本；请求提交后，
+源 Terminal 和 IDEA 草稿保留。准备期间可点顶部 **Stop fork preparation** 图标停止并保留全量副本；请求提交后，
 断联只查询原操作 ID，不重复拉起 Terminal 或再次 fork。失败或未知时保留副本供检查。
 
 **Rewind** 按钮（撤销图标，位于 Fork 左侧）经双向 bridge 在同一 session 内导航。
@@ -91,10 +91,13 @@ Fork 会拒绝忙碌会话、有歧义的旧卡片、带 label 的会话，以�
 pi 忙碌、首条消息无 parent，或 parent 是另一条 user/custom message 时，会在执行前拒绝，
 避免多退或改变 TUI 编辑器。等待期间编辑 IDEA 草稿不会被覆盖，回退文本会保存在
 **Restore text** 入口，点击追加。输入栏左下角会用最新 v2 分支快照显示低调的
-`用户/AI+tool` 次数。**Sync** 可刷新当前状态，或在确认旧执行结束后显式对账；
-它不会重做回退。未知期间可以查看、复制和编辑草稿，同一会话的冲突修改会被锁住。
+`用户/AI+tool` 次数。状态自动同步；可恢复未决操作时，顶部才显示 **Sync current session**
+图标，它不会重做操作。**Restore text** 也改为按需出现的顶部图标，悬停可查看用途。
+输入框左下角的 Workspace 使用无边框小图标。未知期间可以查看、复制和编辑草稿，
+同一会话的冲突修改会被锁住。
 
-卡片使用原生 session/entry id 绑定；删除只保存本地隐藏记录，后续快照不会把它恢复。
+卡片使用原生 session/entry id 绑定，只保留 Rewind、Fork、Copy；通过 Rewind 调整活跃历史。
+旧隐藏记录继续兼容，避免以前隐藏的卡片重新出现。
 有歧义的旧卡片保留且禁用回退。首次迁移保留原面板可见性，因此迁移前仅在 TUI 输入的历史
 也可能继续在面板隐藏；初始化后的新 TUI 用户消息会正常显示。
 
