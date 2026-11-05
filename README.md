@@ -46,10 +46,10 @@ IDEA (PiBridgeServer, loopback TCP + token)
 Terminal tab  ──  ~/.pi/agent/extensions/pi-launcher-bridge.ts (lazy-installed, content-compared)
 ```
 
-- The managed extension (VERSION **8**) runs in the same interactive TUI process. A v2 authenticated connection carries requests, results and full native active-branch snapshots; it never starts a second pi process or uses RPC mode.
-- Rewind requires the verified API baseline **pi 1.5.0 / session v3**, a successful command-dispatch probe and an advertised capability. Unsupported versions keep control actions disabled. This development implementation still needs CI, real TUI and IDE acceptance.
-- Rewind requests are saved and sent once. Disconnects and timeouts preserve the panel and query the original request id; reconnect never replays a modification. `Sync` can reconcile confirmed current state after the old execution is known to have ended.
-- Working/model/file notifications and panel Fork still use the legacy v1 path. Once v2 owns a tab, delayed v1 session events cannot rebind it. See the [protocol](docs/bridge-protocol.md) for developer contracts.
+- The managed extension (VERSION **9**) runs in the same interactive TUI process. A v2 authenticated connection carries requests, results and full native active-branch snapshots; it never starts a second pi process or uses RPC mode.
+- Rewind and Fork require the verified API baseline **pi 1.5.0 / session v3**, a successful command-dispatch probe and advertised capabilities. Unsupported versions keep control actions disabled. The Fork migration still needs CI, real TUI and IDE acceptance.
+- Modification requests are saved and sent once. Disconnects and timeouts preserve the panel and query the original request id; reconnect never replays a modification. `Sync` can reconcile confirmed current state after the old execution is known to have ended.
+- Working/model/file notifications retain the v1 path. Fork and Rewind use v2 operations. Once v2 owns a tab, delayed v1 session events cannot rebind it. See the [protocol](docs/bridge-protocol.md) for developer contracts.
 
 ## Usage
 
@@ -81,16 +81,21 @@ next to Rewind, Copy and Delete): it creates a new conversation `<original>-fork
 that keeps the history **up to and including** that message and its reply —
 everything after it is dropped — with an empty input, so you continue from that
 exact point in a fresh session. The original conversation stays untouched.
-Under the hood the plugin launches pi with `--fork <session>` and the bridge
-extension's `/bridge-fork` command (fork at the turn's leaf entry) trims the
-copy. The endpoint is the last entry before the next user message, including
-all tool calls/results and the final reply, not just the first assistant entry.
-The command is sent once after the first bridge bind, with a short startup
-settling delay. Then IDEA checks the bound session id every 1.5 seconds, at
-most six times; a changed id confirms the fork, otherwise it logs a timeout.
-Checks are read-only and never rewrite the TUI input.
+Under the hood the plugin creates a full CLI copy in a separate Terminal, waits
+for its bridge capability and complete snapshot, then verifies the selected turn
+by native entry identities. A single v2 request forks at the turn's leaf through
+the public API. The endpoint includes all tool calls/results and the final reply.
+The replacement session confirms its branch through a durable handoff; only
+then does the panel trim its copy. The intermediate copy is not archived.
 This panel action deliberately differs from native `/fork`'s default edit-before
 behavior.
+
+Fork rejects busy sessions, ambiguous old cards, labelled sessions and a target
+TUI editor containing input. Your source Terminal and IDEA draft stay intact.
+During preparation, **Sync** can stop the workflow and keep the full copy. After
+submission, disconnects only query the original operation id; they never start
+another Terminal or repeat the fork. A failed or unconfirmed fork keeps the
+copy visible for inspection.
 
 The **Rewind** button (undo icon, left of Fork) uses the bidirectional bridge to
 navigate within the same session. It keeps the panel unchanged until pi confirms
@@ -111,12 +116,10 @@ unbound and cannot be rewound. The first migration preserves the old panel's
 visibility; older messages that were only in the TUI may stay hidden in the
 panel, while new TUI messages appear after initialization.
 
-Panel **Fork** retains its legacy CLI copy + one Terminal command workflow;
-it has not migrated to v2 and can still leave an untrimmed copy after failure.
-
 Validation entry points: `node --test tests/bridge-extension.test.mjs`, Gradle
 `test`, and the opt-in real TUI smoke
-`PI_BINARY=/path/to/pi python3 tests/bridge-tui-smoke.py`. CI can run the smoke
+`PI_BINARY=/path/to/pi python3 tests/bridge-tui-smoke.py` (rewind and fork, including
+runtime replacement). CI can run the smoke
 through the `tui_smoke` workflow input. These checks still need to be run for
 this refactor; source delivery does not establish compatibility. Installation
 compares full resource contents, and updated code loads in a new Pi Terminal

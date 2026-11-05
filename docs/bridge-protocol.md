@@ -1,6 +1,6 @@
 # IDEA Bridge ↔ pi extension 通信协议
 
-**状态：v2 首期代码已实现，尚待 CI / 真实 TUI / IDE 集成验收。** 公共通道、快照、rewind 与通用 handoff 契约已接入；面板 Fork 仍走旧流程，不属于已迁移能力。本文面向开发者；MUST/必须为契约要求，建议参数可以调节但不得改变语义。
+**状态：v2 首期代码已实现，尚待 CI / 真实 TUI / IDE 集成验收。** 公共通道、快照、rewind 与 ForkWorkflow 已接入。Fork 仍先创建独立 CLI 副本，再经 v2 request / 耐久 handoff 确认分叉；本轮 Fork 改动待验证。本文面向开发者；MUST/必须为契约要求，建议参数可以调节但不得改变语义。
 
 关联方案：[双向操作通道与回退确认](plans/2026-11-04-2114——双向操作通道与回退确认.md)。
 
@@ -146,7 +146,12 @@ source
 |---|---|---|
 | `session.snapshot/1` | `{}` | 只读全量快照，可重新请求 |
 | `conversation.rewind/1` | `{targetEntryId}` | pi 1.5.0 / session v3；非 busy、完整稳定观察、目标 parent 安全才执行；终态含目标 id 和快照 |
+| `conversation.forkAtTurn/1` | `{targetEntryId,turnLeafId}` | 在独立副本内执行；完整 turn（含 tools）按原生身份匹配；`ctx.fork(position:"at",withSession)`；耐久 handoff 终态含目标 id、turn leaf、新 sessionId 与历史快照；取消/替换异常也用同一 ticket 记录 |
 | `operation.reconcile/1` | `{operationIds:[...]}`（1–128 个唯一 id） | 耐久的日志元数据操作；只在这些执行已确认结束时解除运行时锁；返回相同 id 列表和当前快照；不执行原请求、不把其未知结果改写为成功 |
+
+ForkWorkflow 的 Terminal 准备是本地业务阶段：通用 preparation reservation 先落盘，尚无 request 时不发 query；READY 后将同一 id 一次性转换为普通 request。IDE 重开后未发送 preparation 标为 not_sent，不重新启动或执行；已发送只查询原 id。目标面板在核验成功前保留完整副本。取消准备可保留副本；绑定最终会话时不归档中间副本。
+
+首版 fork 只支持持久会话且没有 label 条目。公开 pi fork 会重建 label/rechain，未实现其核验适配前执行前 UNSUPPORTED。目标 TUI 编辑器必须为空：pi 1.5.0 wrapper 会在 withSession 返回后清空 editor，不能先确认“保留非空编辑器”。源 Terminal 输入和 IDEA 草稿不受影响。启动或替换 runtime 补写的 session_info/model_change/thinking_level_change 可跟在已核验 turn 后，其他新增内容不放行。withSession 的历史快照以 `handoff-<nonce>` 标记核验采集来源；它不是连接 runtime 身份，也不作为当前快照投递，当前状态仍由新认证连接独立采集。
 
 对账响应可附 `executionEnded:true`。它不是执行成功状态，也不能凭新 hello / runtimeId 改变 / lease 释放推断：必须有原 executor 返回后持久化的 `.ended` 证据、耐久终态，或已确认原进程不再存在。仍在展开的同进程 reload 回调没有上述证据时不可对账；handoff ticket 未完成时也不可对账。原日志丢失仍返回 NOT_FOUND，不产生结束证据。
 
@@ -167,7 +172,7 @@ fork/switch 使用运行时的通用 handoff，不改变 wire 消息族或 opera
 2. 在公开 withSession 回调中仅使用新 ctx 核验结果，以只捕获序列化数据的日志函数写终态。
 3. 新实例读取允许的 ticket/日志并报告原请求结果；旧 socket/ctx/pending map 不再使用。
 4. 新 hello 可先于终态到达，先作为候选实例，不凭 sessionId 改变认定成功。交接校验通过才提交会话绑定。
-5. 日志必须单写者/条件原子更新，不能由旧新 runtime 同时覆盖。取消、shutdown 清理与新实例恢复均须测试。
+5. 日志必须单写者/条件原子更新，不能由旧新 runtime 同时覆盖。ticket/terminal 用已 fsync 的临时文件原子排他链接，读取者同步目录后才采信；取消、shutdown 清理与新实例恢复均须测试。
 6. 意外 `/new`/reload 不可借在途 fork 任意认领结果。执行已完成但日志未落盘仍 UNKNOWN，不自动再次 fork。
 
 Transport 只验证连接；OperationRuntime 验证交接；业务层决定新 session 如何展示，三者不得合并。
@@ -211,7 +216,7 @@ v2 接管 tab 的 session 绑定与快照后，旧 v1 session_changed/stopped �
 
 参考本机 pi 1.5.0 的 `docs/rpc.md`、`docs/session-format.md`、`docs/extensions.md` 及对应分发/导航源码。未据此声称其他版本兼容。
 
-实施基线锁定为 pi **1.5.0** 的交互式 TUI 与原生 session v3。其他 pi 版本不声明 `conversation.rewind`，probe 未完成/失败不声明操作能力。单元契约与真实 TUI smoke 是不同验证层；未执行 smoke 不能声称真实 TUI 兼容已通过。
+实施基线锁定为 pi **1.5.0** 的交互式 TUI 与原生 session v3。其他 pi 版本不声明 `conversation.rewind` / `conversation.forkAtTurn`，probe 未完成/失败不声明操作能力。单元契约与真实 TUI smoke 是不同验证层；未执行 smoke 不能声称真实 TUI 兼容已通过。
 
 首期参数：单帧默认 32 MiB、发送队列默认 64 MiB（最多 128 帧）、extension 待处理帧最多 128 个；IDE socket reader 等待后台消费，快照与 UI 通知分别合并。extension 以 `PI_BRIDGE_MAX_FRAME_BYTES` / `PI_BRIDGE_MAX_QUEUE_BYTES` / `PI_BRIDGE_MAX_JOURNAL_BYTES` 配置预算；IDE 以 `pi.bridge.maxFrameBytes` / `pi.bridge.maxQueueBytes` / `pi.bridge.maxJournalBytes` 系统属性配置。两端日志默认各 512 MiB。
 
@@ -219,4 +224,4 @@ IDE 日志位于 IDE system 目录的 `pi-terminal-bridge/<project-hash>/local`�
 
 snapshotId 覆盖 runtimeId、事件代数及完整原生 session/header/file/branch/公开状态；缓存最多 16 个观察凭据。采集前后对拍，不能只比较 leafId。首期 rewind 在导航前拒绝无 parent、parent 是 user 或 custom_message 的目标，避免多退或改变 TUI 编辑器；安全 parent 的未回复消息可以处理。
 
-验证入口：`node --test tests/bridge-extension.test.mjs`（真实资源的运行时/故障契约）、Gradle `test`（framing、快照、投影、业务提交前置条件）、`PI_BINARY=/path/to/pi python3 tests/bridge-tui-smoke.py`（隔离配置的 PTY + 真实 pi 1.5.0）。CI 手动触发可勾选 `tui_smoke`；默认构建会执行 Node/JVM 契约测试。源码交付不等于这些验证已通过。
+验证入口：`node --test tests/bridge-extension.test.mjs`（真实资源的运行时/故障契约）、Gradle `test`（framing、快照、投影、业务提交前置条件）、`PI_BINARY=/path/to/pi python3 tests/bridge-tui-smoke.py`（隔离配置的 PTY + 真实 pi 1.5.0，覆盖 rewind 与 CLI 副本内 fork/withSession 交接）。CI 手动触发可勾选 `tui_smoke`；默认构建会执行 Node/JVM 契约测试。源码交付不等于这些验证已通过。

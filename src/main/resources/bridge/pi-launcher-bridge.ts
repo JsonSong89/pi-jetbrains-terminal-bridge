@@ -29,8 +29,21 @@ const frame = (type, fields = {}) => ({ v: 2, type, ...fields });
 const error = (code, message, effect = "none") => Object.assign(new Error(message), { code, effect });
 const validId = id => typeof id === "string" && /^[A-Za-z0-9-]{1,128}$/.test(id);
 const enabled = () => !!PORT && !!TOKEN && !!TAB_KEY;
-const textOf = content => typeof content === "string" ? content : Array.isArray(content)
-  ? content.filter(p => p?.type === "text").map(p => p.text).join("") : "";
+const readSession = ctx => {
+  const sm = ctx.sessionManager;
+  if (typeof sm?.getBranch !== "function" || typeof sm?.getLeafId !== "function" || typeof ctx.isIdle !== "function") throw error("UNSUPPORTED", "Missing public snapshot APIs");
+  return clone({ session: { id: sm.getSessionId(), header: sm.getHeader?.(), file: sm.getSessionFile?.() },
+    branch: { leafId: sm.getLeafId(), entries: sm.getBranch() },
+    state: { idle: ctx.isIdle(), pendingMessages: ctx.hasPendingMessages?.() ?? false, model: modelLabel(ctx.model) } });
+};
+const captureSession = (ctx, runtimeId, generation = 0) => {
+  const before = readSession(ctx), after = readSession(ctx);
+  const snapshot = { snapshotId: hash({ runtimeId, generation, ...before }), capturedAt: new Date().toISOString(),
+    complete: true, consistency: canonical(before) === canonical(after) ? "stable" : "changed_during_capture", ...before,
+    source: { piVersion: PI_VERSION, runtimeId } };
+  if (Buffer.byteLength(JSON.stringify(snapshot)) + 8192 > MAX_FRAME) throw error("CONTEXT_TOO_LARGE", "Full session snapshot exceeds frame budget");
+  return snapshot;
+};
 
 /** Async, bounded, LF-only transport. It never retains requests for replay. */
 class Transport {
@@ -149,10 +162,13 @@ class OperationJournal {
   async writeExclusive(file, value) {
     const body = JSON.stringify(value), size = Buffer.byteLength(body);
     if (this.bytes + size > MAX_JOURNAL) throw error("CONTEXT_TOO_LARGE", "Operation journal budget exhausted");
-    const handle = await fs.open(file, "wx", 0o600);
-    try { await handle.writeFile(body); await handle.sync(); }
-    finally { await handle.close(); }
-    await this.syncDirectory(); this.bytes += size;
+    const temp = file + "." + crypto.randomUUID() + ".tmp";
+    const handle = await fs.open(temp, "wx", 0o600);
+    try {
+      await handle.writeFile(body); await handle.sync(); await handle.close();
+      await fs.link(temp, file); // Atomic create-if-absent; readers never see a partial ticket/terminal.
+      await this.syncDirectory(); this.bytes += size;
+    } finally { await handle.close().catch(() => {}); await fs.unlink(temp).catch(() => {}); }
   }
   save(record) {
     const copy = clone(record);
@@ -217,7 +233,8 @@ class OperationJournal {
     if (canonical(ticket) !== canonical(config.ticket)) throw error("ID_CONFLICT", "Handoff ticket mismatch");
     // verify is adapter-owned, uses only freshContext and serialized ticket evidence.
     const result = await verify(freshContext, ticket.expected);
-    if (!terminal(result) || result.effect === "unknown") throw error("INTERNAL_ERROR", "Unverified replacement result", "unknown");
+    if (!terminal(result) || !["none", "applied", "unknown"].includes(result.effect) ||
+        (result.status === "succeeded" && result.effect !== "applied" && result.effect !== "none")) throw error("INTERNAL_ERROR", "Invalid replacement result", "unknown");
     journal.bytes = (await Promise.all((await fs.readdir(journal.directory)).map(async name => (await fs.stat(path.join(journal.directory, name))).size))).reduce((a, b) => a + b, 0);
     await journal.writeExclusive(journal.file(ticket.id, ".terminal"), { digest: ticket.digest, nonce: ticket.nonce, response: result });
   }
@@ -225,7 +242,10 @@ class OperationJournal {
     try {
       const ticket = JSON.parse(await fs.readFile(this.file(record.id, ".ticket"), "utf8"));
       const result = JSON.parse(await fs.readFile(this.file(record.id, ".terminal"), "utf8"));
-      if (ticket.digest !== record.digest || result.digest !== ticket.digest || result.nonce !== ticket.nonce) throw error("ID_CONFLICT", "Invalid handoff evidence");
+      if (canonical(ticket) !== canonical(record.handoff) || ticket.tabKey !== TAB_KEY ||
+          ticket.originRuntimeId !== record.runtimeId || ticket.digest !== record.digest ||
+          result.digest !== ticket.digest || result.nonce !== ticket.nonce || !terminal(result.response)) throw error("ID_CONFLICT", "Invalid handoff evidence");
+      await this.syncDirectory(); // A concurrent callback may still be syncing the new directory entry.
       return result.response;
     } catch (e) { if (e.code === "ENOENT") return undefined; throw e; }
   }
@@ -246,8 +266,8 @@ class PiAdapter {
     pi.on("input", (event, ctx) => {
       const text = String(event.text).trimStart();
       if (text.startsWith("/pi-bridge-internal-")) return { action: "handled" };
-      if (/^\/bridge-rewind(?:\s|$)/.test(text)) {
-        ctx?.ui?.notify?.("Legacy rewind is disabled; update Pi Terminal Bridge and restart the terminal", "warning");
+      if (/^\/bridge-(?:rewind|fork)(?:\s|$)/.test(text)) {
+        ctx?.ui?.notify?.("Legacy control commands are disabled; update Pi Terminal Bridge and restart the terminal", "warning");
         return { action: "handled" };
       }
     });
@@ -276,23 +296,13 @@ class PiAdapter {
     for (const job of this.pending.values()) job.reject(error("DISCONNECTED", "Bridge runtime stopped before command entry"));
     this.pending.clear();
   }
-  read(ctx) {
-    const sm = ctx.sessionManager;
-    if (typeof sm?.getBranch !== "function" || typeof sm?.getLeafId !== "function" || typeof ctx.isIdle !== "function") throw error("UNSUPPORTED", "Missing public snapshot APIs");
-    return clone({ session: { id: sm.getSessionId(), header: sm.getHeader?.(), file: sm.getSessionFile?.() },
-      branch: { leafId: sm.getLeafId(), entries: sm.getBranch() },
-      state: { idle: ctx.isIdle(), pendingMessages: ctx.hasPendingMessages?.() ?? false, model: modelLabel(ctx.model) } });
-  }
+  read(ctx) { return readSession(ctx); }
   capture(ctx) {
     const generation = this.generation;
-    const before = this.read(ctx), after = this.read(ctx);
-    const stable = generation === this.generation && canonical(before) === canonical(after);
-    const snapshot = { snapshotId: hash({ runtimeId: this.runtimeId, generation, ...before }), capturedAt: new Date().toISOString(),
-      complete: true, consistency: stable ? "stable" : "changed_during_capture", ...before,
-      source: { piVersion: PI_VERSION, runtimeId: this.runtimeId } };
-    if (Buffer.byteLength(JSON.stringify(snapshot)) + 8192 > MAX_FRAME) throw error("CONTEXT_TOO_LARGE", "Full session snapshot exceeds frame budget");
-    if (stable) {
-      this.observations.set(snapshot.snapshotId, hash(before));
+    const snapshot = captureSession(ctx, this.runtimeId, generation);
+    if (generation !== this.generation) snapshot.consistency = "changed_during_capture";
+    if (snapshot.consistency === "stable") {
+      this.observations.set(snapshot.snapshotId, true);
       while (this.observations.size > 16) this.observations.delete(this.observations.keys().next().value);
     }
     return snapshot;
@@ -306,7 +316,7 @@ class PiAdapter {
   }
   preflight(request, ctx) {
     const current = this.capture(ctx);
-    if (!this.probePassed || PI_VERSION !== "1.5.0" || current.session.header?.version !== 3) throw error("UNSUPPORTED", "Rewind requires verified pi 1.5.0 TUI command dispatch");
+    if (!this.probePassed || PI_VERSION !== "1.5.0" || current.session.header?.version !== 3) throw error("UNSUPPORTED", "Operation requires verified pi 1.5.0 TUI command dispatch");
     if (!current.state.idle || current.state.pendingMessages) throw error("BUSY", "Pi is busy; no operation was queued");
     if (request.startBefore !== undefined && (!Number.isFinite(request.startBefore) || Date.now() > request.startBefore)) throw error("STALE_CONTEXT", "Operation start deadline expired");
     if (current.consistency !== "stable" || request.context?.sessionId !== current.session.id ||
@@ -314,6 +324,65 @@ class PiAdapter {
       throw error("STALE_CONTEXT", "Session changed since the observed snapshot");
     }
     return current;
+  }
+  async forkAtTurn(request, ctx, before, markEffect, handoff) {
+    if (typeof ctx.fork !== "function" || !before.session.file) throw error("UNSUPPORTED", "Fork requires a persisted session and the public fork API");
+    if (ctx.ui.getEditorText() !== "") throw error("BUSY", "The target TUI editor contains input; fork was not queued");
+    const entries = before.branch.entries;
+    const index = entries.findIndex(e => e.id === request.params.targetEntryId && e.type === "message" && e.message?.role === "user");
+    const leafIndex = entries.findIndex(e => e.id === request.params.turnLeafId);
+    const nextUser = entries.findIndex((e, i) => i > index && e.type === "message" && e.message?.role === "user");
+    const end = nextUser < 0 ? entries.length : nextUser;
+    if (index < 0 || leafIndex < index || leafIndex >= end ||
+        entries.slice(leafIndex + 1, end).some(e => !["session_info", "model_change", "thinking_level_change"].includes(e.type))) throw error("STALE_CONTEXT", "The copied turn no longer matches the selected leaf");
+    if (ctx.sessionManager.getEntries?.().some(e => e.type === "label") || entries.some(e => e.type === "label")) throw error("UNSUPPORTED", "Fork of labelled sessions requires a verified label adapter");
+    const expected = clone({ session: before.session, branch: { leafId: entries[leafIndex].id, entries: entries.slice(0, leafIndex + 1) },
+      editor: ctx.ui.getEditorText(), targetEntryId: request.params.targetEntryId });
+    const config = await handoff(expected);
+    let invoked = false, replaced = false;
+    try {
+      this.preflight(request, ctx); // Ticket I/O yielded; recheck editor and labels too.
+      if (ctx.ui.getEditorText() !== expected.editor) throw error("BUSY", "The target TUI editor changed before fork");
+      if (ctx.sessionManager.getEntries?.().some(e => e.type === "label")) throw error("UNSUPPORTED", "Target labels changed before fork");
+      invoked = true; markEffect();
+      const result = await ctx.fork(expected.branch.leafId, { position: "at", withSession: async fresh => {
+        replaced = true;
+        await OperationJournal.finishHandoff(config, fresh, (current, evidence) => PiAdapter.verifyFork(current, evidence, config.ticket.nonce));
+      } });
+      if (!replaced && result?.cancelled === true && !this.closed) {
+        const after = this.capture(ctx);
+        const unchanged = canonical(after.session) === canonical(before.session) && canonical(after.branch) === canonical(before.branch) && ctx.ui.getEditorText() === expected.editor;
+        const outcome = { status: "cancelled", effect: unchanged ? "none" : "unknown",
+          error: { code: "CANCELLED", message: "Pi cancelled fork" }, context: { afterSnapshot: after } };
+        await OperationJournal.finishHandoff(config, undefined, () => outcome);
+      } else if (!replaced) {
+        throw error("POSTCONDITION_FAILED", "Fork did not provide a replacement context", "unknown");
+      }
+    } catch (e) {
+      // Only plain evidence survives replacement; never read the old command context here.
+      const outcome = { status: "failed", effect: invoked ? "unknown" : "none",
+        error: { code: e.code ?? "INTERNAL_ERROR", message: e.message } };
+      await OperationJournal.finishHandoff(config, undefined, () => outcome).catch(() => {});
+    }
+    return { handoff: true };
+  }
+  static verifyFork(ctx, expected, nonce) {
+    try {
+      const after = captureSession(ctx, "handoff-" + nonce);
+      const expectedEntries = expected.branch.entries, actualEntries = after.branch.entries;
+      const matchesBranch = actualEntries.length >= expectedEntries.length &&
+        canonical(actualEntries.slice(0, expectedEntries.length)) === canonical(expectedEntries) &&
+        actualEntries.slice(expectedEntries.length).every(e => ["session_info", "model_change", "thinking_level_change"].includes(e.type));
+      const valid = ctx.mode === "tui" && after.consistency === "stable" && after.state.idle && !after.state.pendingMessages &&
+        after.session.header?.version === 3 && typeof after.session.id === "string" && after.session.id.length > 0 &&
+        after.session.header.id === after.session.id && after.session.id !== expected.session.id &&
+        after.session.file && after.session.file !== expected.session.file && after.session.header?.parentSession === expected.session.file &&
+        matchesBranch && ctx.ui.getEditorText() === expected.editor;
+      return { status: valid ? "succeeded" : "failed", effect: valid ? "applied" : "unknown",
+        ...(valid ? { data: { targetEntryId: expected.targetEntryId, turnLeafId: expected.branch.leafId, sessionId: after.session.id } } :
+          { error: { code: "POSTCONDITION_FAILED", message: "Replacement session, branch or TUI editor did not match fork evidence" } }),
+        context: { afterSnapshot: after } };
+    } catch (e) { return { status: "failed", effect: "unknown", error: { code: e.code ?? "INTERNAL_ERROR", message: e.message } }; }
   }
   async rewind(request, ctx, before, markEffect) {
     const entries = before.branch.entries;
@@ -367,6 +436,11 @@ class OperationRuntime {
         }
         return { status: "succeeded", effect: "none", data: { operationIds: request.params.operationIds }, after: snapshot };
       } });
+    this.register("conversation.forkAtTurn", { version: 1, mutates: true,
+      validate: params => params && Object.keys(params).length === 2 &&
+        typeof params.targetEntryId === "string" && params.targetEntryId.length > 0 && typeof params.turnLeafId === "string" && params.turnLeafId.length > 0,
+      preflight: (request, ctx) => adapter.preflight(request, ctx),
+      execute: (request, ctx, before, markEffect, handoff) => adapter.forkAtTurn(request, ctx, before, markEffect, handoff) });
     this.register("conversation.rewind", { version: 1, mutates: true,
       validate: params => params && Object.keys(params).length === 1 && typeof params.targetEntryId === "string" && params.targetEntryId.length > 0,
       preflight: (request, ctx) => adapter.preflight(request, ctx),
@@ -491,9 +565,13 @@ class OperationRuntime {
         const result = await descriptor.execute(record.request, ctx, before, () => { effectStarted = true; },
           expected => this.prepareHandoff(record, expected));
         if (!descriptor.validateResult(result)) throw error("INTERNAL_ERROR", "Invalid executor result", effectStarted ? "unknown" : "none");
+        if (result.handoff === true) return result; // Old ctx may already be invalidated.
         return descriptor.verify(ctx, before, result);
       });
-      if (result.handoff === true && record.handoff) return;
+      if (result.handoff === true && record.handoff) {
+        if (!this.adapter.closed) await this.query(record.id); // Cancellation leaves this runtime alive.
+        return;
+      }
       response = this.response(record.request, { status: result.status, effect: result.effect, data: result.data,
         error: result.error, context: { afterSnapshot: result.after } });
     } catch (e) {
@@ -523,7 +601,7 @@ class OperationRuntime {
 let seq = Date.now() * 1000;
 let sessionId;
 let lastRunStopReason;
-// v1 remains for notifications/file refresh and the legacy fork workflow only.
+// v1 remains only for notifications and file refresh.
 function send(type, data) {
   if (!enabled()) return;
   const payload = JSON.stringify({ v: 1, seq: seq++, type, tabKey: TAB_KEY, token: TOKEN, data }) + "\n";
@@ -569,7 +647,9 @@ export default function (pi) {
       if (closed) { await journal.close().catch(() => {}); return; }
       const capabilities = adapter.probePassed ? { "session.snapshot": [1] } : {};
       if (writable && adapter.probePassed) capabilities["operation.reconcile"] = [1];
-      if (writable && adapter.probePassed && PI_VERSION === "1.5.0") capabilities["conversation.rewind"] = [1];
+      if (writable && adapter.probePassed && PI_VERSION === "1.5.0") {
+        capabilities["conversation.rewind"] = [1]; capabilities["conversation.forkAtTurn"] = [1];
+      }
       transport = new Transport(() => frame("hello", { token: TOKEN, tabKey: TAB_KEY, runtimeId,
         piVersion: PI_VERSION, extensionVersion: String(VERSION), capabilities, sessionId }),
         message => {
@@ -609,35 +689,5 @@ export default function (pi) {
     const paths = [input.path, input.filePath, input.file_path, input.file, details.path, details.filePath, details.file_path,
       ...(Array.isArray(input.edits) ? input.edits.map(e => typeof e === "string" ? e : e?.path) : [])];
     for (const p of paths) if (typeof p === "string" && p.length) send("file_modified", { path: p });
-  });
-
-  // Legacy fork remains a CLI copy + one Terminal command; it is not a v2 capability.
-  pi.registerCommand("bridge-fork", {
-    description: "Internal legacy fork (Pi Terminal Bridge)",
-    handler: async (args, ctx) => {
-      try {
-        const parts = String(args ?? "").trim().split(/\s+/);
-        if (parts.length !== 2 || !/^\d+$/.test(parts[0]) || !Number.isSafeInteger(Number(parts[0])) ||
-            !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(parts[1])) throw error("INVALID_ARGUMENT", "bridge-fork: bad arguments");
-        const bytes = Buffer.from(parts[1], "base64"), text = bytes.toString("utf8");
-        if (!text || bytes.toString("base64") !== parts[1] || !Buffer.from(text).equals(bytes)) throw error("INVALID_ARGUMENT", "bridge-fork: bad arguments");
-        const entries = ctx.sessionManager.getBranch();
-        const users = entries.filter(e => e.type === "message" && e.message?.role === "user");
-        let user = users[Number(parts[0])];
-        if (!user || textOf(user.message.content) !== text) {
-          const matches = users.filter(e => textOf(e.message.content) === text);
-          if (matches.length !== 1) throw error("AMBIGUOUS_TARGET", "bridge-fork: matching message not found or ambiguous");
-          user = matches[0];
-        }
-        let leaf = user;
-        for (let i = entries.indexOf(user) + 1; i < entries.length; i++) {
-          if (entries[i].type === "message" && entries[i].message?.role === "user") break;
-          leaf = entries[i];
-        }
-        const result = await ctx.fork(leaf.id, { position: "at" });
-        if (result?.cancelled) return;
-        // Old context is invalid after replacement; no notification through it.
-      } catch (e) { try { ctx.ui.notify(e.message ?? "bridge-fork failed", "error"); } catch (_e) {} }
-    },
   });
 }

@@ -35,7 +35,9 @@ class BridgeOperations(private val project: Project) : Disposable {
     internal fun record(id: String): JsonObject? = recordViews[id]?.deepCopy()
     fun handle(id: String): OperationHandle? = if (recordViews.containsKey(id)) OperationHandle(id, this) else null
     internal fun query(id: String) {
-        val tab = BridgeProtocol.string(recordViews[id] ?: return, "tabKey") ?: return
+        val record = recordViews[id] ?: return
+        if (!record.has("request")) return
+        val tab = BridgeProtocol.string(record, "tabKey") ?: return
         PiBridgeServer.getInstance(project).connection(tab)?.send(BridgeProtocol.frame("query").apply { addProperty("id", id) })
     }
     internal fun subscribe(id: String, listener: (JsonObject) -> Unit): AutoCloseable {
@@ -64,7 +66,7 @@ class BridgeOperations(private val project: Project) : Disposable {
             records.values.forEach(::publish)
         }
         executor.scheduleWithFixedDelay({
-            if (!project.isDisposed) records.values.filter(::unresolved).forEach { record ->
+            if (!project.isDisposed) records.values.filter { unresolved(it) && it.has("request") }.forEach { record ->
                 val tab = BridgeProtocol.string(record, "tabKey") ?: return@forEach
                 val connection = PiBridgeServer.getInstance(project).connection(tab)
                 if (connection != null) {
@@ -79,6 +81,9 @@ class BridgeOperations(private val project: Project) : Disposable {
         }, 5, 5, TimeUnit.SECONDS)
     }
 
+    fun preparing(tab: String): Boolean = recordViews.values.any {
+        BridgeProtocol.string(it, "tabKey") == tab && BridgeProtocol.string(it, "localState") == "preparing"
+    }
     fun snapshot(tab: String): SessionSnapshot? = snapshots[tab]
     fun locked(tab: String): Boolean = !loaded || damaged || recordViews.values.any {
         BridgeProtocol.string(it, "tabKey") == tab && unresolved(it)
@@ -88,6 +93,7 @@ class BridgeOperations(private val project: Project) : Disposable {
         val r = recordViews.values.firstOrNull { BridgeProtocol.string(it, "tabKey") == tab && unresolved(it) }
             ?: return contextErrors[tab]?.let { "Session context unavailable · $it" }
         return when (BridgeProtocol.string(r, "localState")) {
+            "preparing" -> "Preparing conversation · waiting for bridge"
             "conflict" -> "Result needs reconciliation"
             else -> when (BridgeProtocol.string(r, "observation")) {
                 "unknown" -> "Operation result unknown · checking"
@@ -100,7 +106,7 @@ class BridgeOperations(private val project: Project) : Disposable {
     private fun unresolved(record: JsonObject): Boolean = BridgeProtocol.string(record, "localState") !in setOf("applied", "reconciled", "rejected", "not_sent")
 
     fun connected(connection: BridgeConnection) = executor.execute {
-        records.values.filter { BridgeProtocol.string(it, "tabKey") == connection.tabKey && unresolved(it) }.forEach {
+        records.values.filter { BridgeProtocol.string(it, "tabKey") == connection.tabKey && unresolved(it) && it.has("request") }.forEach {
             connection.send(BridgeProtocol.frame("query").apply { addProperty("id", BridgeProtocol.string(it, "id")) })
         }
         requestSnapshot(connection.tabKey)
@@ -135,11 +141,58 @@ class BridgeOperations(private val project: Project) : Disposable {
         return pending.isEmpty() || (reconcileOf.isNotEmpty() && pending.mapNotNull { BridgeProtocol.string(it, "id") }.toSet() == reconcileOf)
     }
 
-    fun submit(tab: String, method: String, params: JsonObject, snapshot: SessionSnapshot, business: JsonObject, reconcileOf: Set<String> = emptySet()): OperationHandle? {
-        if (!canSubmit(tab, reconcileOf)) return null
+    /** Reserve a local workflow before its external preparation starts. No request exists yet. */
+    fun prepare(tab: String, business: JsonObject): OperationHandle? {
+        val id = UUID.randomUUID().toString()
+        val record = JsonObject().apply {
+            addProperty("id", id); addProperty("tabKey", tab)
+            addProperty("localState", "preparing"); addProperty("sent", false)
+            add("business", business.deepCopy())
+        }
+        synchronized(records) {
+            if (!canSubmit(tab, emptySet())) return null
+            records[id] = record; recordViews[id] = record.deepCopy()
+        }
+        executor.execute {
+            try {
+                store.save(record)
+                record.addProperty("preparationReady", true)
+                publish(record)
+            }
+            catch (_: Exception) {
+                record.addProperty("localState", "not_sent"); publish(record)
+            }
+        }
+        return OperationHandle(id, this)
+    }
+
+    /** Convert a durable preparation into its only execution request, on the same stable id. */
+    fun dispatchPrepared(id: String, method: String, params: JsonObject, snapshot: SessionSnapshot): Boolean {
+        val previous = recordViews[id] ?: return false
+        if (BridgeProtocol.string(previous, "localState") != "preparing") return false
+        val tab = BridgeProtocol.string(previous, "tabKey") ?: return false
+        return submit(tab, method, params, snapshot, previous.getAsJsonObject("business"), preparedId = id) != null
+    }
+
+    fun stopPreparation(id: String) = executor.execute {
+        val record = records[id] ?: return@execute
+        if (BridgeProtocol.string(record, "localState") == "preparing" && !record.has("request")) {
+            record.addProperty("localState", "not_sent")
+            runCatching { saveAndPublish(record) }.onFailure { publish(record) }
+        }
+    }
+
+    private fun preparationReady(id: String): Boolean = BridgeProtocol.string(recordViews[id], "localState") == "preparing" &&
+        recordViews[id]?.get("preparationReady")?.asBoolean == true
+
+    fun submit(tab: String, method: String, params: JsonObject, snapshot: SessionSnapshot, business: JsonObject,
+               reconcileOf: Set<String> = emptySet(), preparedId: String? = null): OperationHandle? {
+        val allowed = if (preparedId != null) setOf(preparedId) else reconcileOf
+        if (!canSubmit(tab, allowed)) return null
+        if (preparedId != null && !preparationReady(preparedId)) return null
         val connection = PiBridgeServer.getInstance(project).connection(tab) ?: return null
         if (!connection.supports(method) || connection.runtimeId != snapshot.runtimeId) return null
-        val id = UUID.randomUUID().toString()
+        val id = preparedId ?: UUID.randomUUID().toString()
         val request = BridgeProtocol.frame("request").apply {
             addProperty("id", id); addProperty("method", method); addProperty("methodVersion", 1)
             add("params", params.deepCopy())
@@ -156,7 +209,7 @@ class BridgeOperations(private val project: Project) : Disposable {
         }
         // Reserve the stable resource synchronously before another UI action can submit.
         synchronized(records) {
-            if (!canSubmit(tab, reconcileOf)) return null
+            if (!canSubmit(tab, allowed) || preparedId != null && !preparationReady(preparedId)) return null
             records[id] = record
             recordViews[id] = record.deepCopy()
         }

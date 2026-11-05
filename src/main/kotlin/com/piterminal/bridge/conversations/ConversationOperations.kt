@@ -49,14 +49,24 @@ class ConversationOperations(private val project: Project, private val service: 
         val id = BridgeProtocol.string(record, "id") ?: return
         val local = BridgeProtocol.string(record, "localState")
         if (local in setOf("applied", "reconciled", "conflict") && restored.add(id)) {
-            record.getAsJsonObject("checkpoint")?.let { restoreCheckpoint(c, it, id) }
+            record.getAsJsonObject("checkpoint")?.let { checkpoint ->
+                val business = record.getAsJsonObject("business")
+                if (id !in c.appliedOperations && checkpoint.get("viewRevision").asLong >= c.viewRevision &&
+                    (BridgeProtocol.string(business, "kind") == "fork" || business.get("forkReplacement")?.asBoolean == true) &&
+                    c.piSessionId == BridgeProtocol.string(business, "sessionId")) {
+                    BridgeProtocol.string(checkpoint, "piSessionId")?.let { service.adoptForkSession(c, it) }
+                }
+                restoreCheckpoint(c, checkpoint, id)
+            }
         }
         if (local in setOf("applied", "reconciled")) {
             committing.remove(id); service.operationChanged(tab); return
         }
         if (local == "not_sent") {
             if (committing.add(id)) warn("Operation was not sent. The panel and draft were preserved.")
-            service.operationChanged(tab); return
+            service.operationChanged(tab)
+            bridge.snapshot(tab)?.let { service.onBridgeSnapshot(tab, it) }
+            return
         }
         if (local in setOf("conflict", "rejected") || id in committing) { service.operationChanged(tab); return }
         if (id in c.appliedOperations) { bridge.commit(id, "applied", checkpoint(c)); return }
@@ -71,7 +81,11 @@ class ConversationOperations(private val project: Project, private val service: 
         if (BridgeProtocol.string(response, "status") != "succeeded") {
             val none = BridgeProtocol.string(response, "effect") == "none"
             bridge.commit(id, if (none) "rejected" else "conflict")
-            warn(BridgeProtocol.string(response.getAsJsonObject("error"), "message") ?: "Rewind could not be confirmed; the panel was preserved.")
+            warn(BridgeProtocol.string(response.getAsJsonObject("error"), "message") ?: "Operation could not be confirmed; the panel was preserved.")
+            return
+        }
+        if (BridgeProtocol.string(record.getAsJsonObject("request"), "method") == ForkWorkflow.METHOD) {
+            finishFork(c, id, record, response)
             return
         }
         val context = response.getAsJsonObject("context")
@@ -102,6 +116,29 @@ class ConversationOperations(private val project: Project, private val service: 
         bridge.commit(id, "applied", checkpoint(c))
     }
 
+    private fun finishFork(c: PiConversation, id: String, record: JsonObject, response: JsonObject) {
+        val business = record.getAsJsonObject("business")
+        val after = response.getAsJsonObject("context")?.getAsJsonObject("afterSnapshot")?.let(::SessionSnapshot)
+        val current = bridge.snapshot(c.id)
+        if (current == null) { committing.remove(id); return }
+        val params = record.getAsJsonObject("request").getAsJsonObject("params")
+        val data = response.getAsJsonObject("data")
+        val valid = data?.get("targetEntryId") == params.get("targetEntryId") && data?.get("turnLeafId") == params.get("turnLeafId") &&
+            BridgeProtocol.string(data, "sessionId") == after?.sessionId && c.piSessionId == BridgeProtocol.string(business, "sessionId") &&
+            ForkPolicy.mayCommit(response, c.piSessionId, business.getAsJsonObject("expectedBranch"), after, current,
+                business.get("viewRevision").asLong, c.viewRevision)
+        if (!valid) {
+            bridge.commit(id, "conflict")
+            warn("Fork returned a result, but the copied session or panel has moved on. Use Sync to reconcile; the fork will not be repeated.")
+            return
+        }
+        service.adoptForkSession(c, after!!.sessionId)
+        project(c, after)
+        c.appliedOperations.add(id)
+        service.saveOperationView(c.id)
+        bridge.commit(id, "applied", checkpoint(c))
+    }
+
     /** A separate durable metadata operation confirms termination; it never reexecutes the old intent. */
     fun reconcile(tab: String): Boolean {
         val snapshot = bridge.snapshot(tab) ?: return warn("No current full snapshot is available yet.")
@@ -120,6 +157,9 @@ class ConversationOperations(private val project: Project, private val service: 
             add("originalIds", ids)
             addProperty("text", records.firstNotNullOfOrNull { BridgeProtocol.string(it.getAsJsonObject("business"), "text") })
             addProperty("viewRevision", c.viewRevision)
+            addProperty("sessionId", c.piSessionId)
+            addProperty("forkReplacement", records.any { BridgeProtocol.string(it.getAsJsonObject("business"), "kind") == "fork" ||
+                it.getAsJsonObject("business").get("forkReplacement")?.asBoolean == true })
         }
         return bridge.submit(tab, "operation.reconcile", JsonObject().apply { add("operationIds", ids.deepCopy()) }, snapshot, business, reconcileOf = originalIds) != null
     }
@@ -140,7 +180,8 @@ class ConversationOperations(private val project: Project, private val service: 
             return
         }
         val originalIds = business.getAsJsonArray("originalIds").map { it.asString }
-        service.onBridgeSessionChanged(c.id, after.sessionId, "v2")
+        if (business.get("forkReplacement")?.asBoolean == true) service.adoptForkSession(c, after.sessionId)
+        else service.onBridgeSessionChanged(c.id, after.sessionId, "v2")
         project(c, after)
         c.recoveryText = BridgeProtocol.string(business, "text").orEmpty()
         c.appliedOperations.addAll(originalIds); c.appliedOperations.add(id)

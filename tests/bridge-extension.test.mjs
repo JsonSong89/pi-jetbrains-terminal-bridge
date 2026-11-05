@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 // Run the packaged artifact. Only the host-provided version import and build placeholder change.
 const source = readFileSync(new URL('../src/main/resources/bridge/pi-launcher-bridge.ts', import.meta.url), 'utf8')
   .replace('import { VERSION as PI_VERSION } from "@earendil-works/pi-coding-agent";', 'const PI_VERSION = "1.5.0";')
-  .replace('@EXTENSION_VERSION@', '8').replace('export default function (pi)', 'function install(pi)');
+  .replace('@EXTENSION_VERSION@', '9').replace('export default function (pi)', 'function install(pi)');
 const plain = v => JSON.parse(JSON.stringify(v));
 const message = (id, parentId, role, content) => ({ id, parentId, type: 'message', message: { role, content, timestamp: 1 } });
 const branch = [message('u1', null, 'user', 'one'), message('a1', 'u1', 'assistant', 'reply'),
@@ -32,7 +32,7 @@ async function harness(t, entries = branch, options = {}) {
   t.after(async () => { for (const close of cleanup.reverse()) await close(); await fs.rm(directory, { recursive: true, force: true }); });
   const api = module(options.env);
   const commands = new Map(), handlers = new Map(), sent = [], calls = [];
-  let active = structuredClone(entries), sessionId = 'session-1', editor = 'unsent TUI draft 🐈', busy = false, modelPrompts = 0;
+  let active = structuredClone(entries), sessionId = 'session-1', editor = options.editor ?? 'unsent TUI draft 🐈', busy = false, modelPrompts = 0;
   const ctx = { mode: 'tui', model: { provider: 'test', id: 'model' },
     sessionManager: { getSessionId: () => sessionId, getHeader: () => ({ version: 3, id: sessionId }),
       getSessionFile: () => '/custom/session.jsonl', getLeafId: () => active.at(-1)?.id ?? null, getBranch: () => structuredClone(active) },
@@ -48,12 +48,13 @@ async function harness(t, entries = branch, options = {}) {
       return { cancelled: false };
     },
   };
+  let commandContext = ctx;
   const pi = { registerCommand: (name, command) => commands.set(name, command),
     on(name, handler) { if (!handlers.has(name)) handlers.set(name, []); handlers.get(name).push(handler); },
     sendUserMessage(text, options) {
       const [name, id] = text.slice(1).split(' ');
       if (options.expandPromptTemplates && commands.has(name)) {
-        void commands.get(name).handler(id, { ...ctx });
+        void commands.get(name).handler(id, { ...commandContext });
       } else {
         if (!(handlers.get('input') ?? []).some(h => h({ text })?.action === 'handled')) modelPrompts++;
       }
@@ -80,8 +81,144 @@ async function harness(t, entries = branch, options = {}) {
   };
   return { api, adapter, journal, runtime, ctx, sent, calls, request, waitResult, commands, pi, directory, cleanup,
     current: () => structuredClone(active), editor: () => editor, modelPrompts: () => modelPrompts,
-    setBusy: value => { busy = value; }, setSession: id => { sessionId = id; }, setBranch: value => { active = value; } };
+    setEditor: value => { editor = value; },
+    setContext: value => { commandContext = value; }, setBusy: value => { busy = value; }, setSession: id => { sessionId = id; }, setBranch: value => { active = value; } };
 }
+
+async function forkHarness(t, options = {}) {
+  const h = await harness(t, options.entries ?? branch, { editor: '' }), forks = [];
+  const original = h.current();
+  let next, staleReads = 0;
+  h.ctx.fork = async (leaf, config) => {
+    forks.push({ leaf, position: config.position });
+    if (options.cancel) return { cancelled: true };
+    const fresh = { ...h.ctx, ui: { ...h.ctx.ui }, sessionManager: { ...h.ctx.sessionManager,
+      getSessionId: () => 'replacement', getSessionFile: () => '/custom/replacement.jsonl',
+      getHeader: () => ({ version: 3, id: 'replacement', parentSession: '/custom/session.jsonl' }) } };
+    h.setBranch(original.slice(0, original.findIndex(e => e.id === leaf) + 1));
+    options.alter?.(fresh, h);
+    h.adapter.close(); await h.journal.close(); h.setContext(fresh);
+    const stale = () => { staleReads++; throw new Error('Old context used after shutdown'); };
+    for (const name of Object.keys(h.ctx.sessionManager)) h.ctx.sessionManager[name] = stale;
+    h.ctx.ui.getEditorText = stale;
+    for (const name of ['sessionManager', 'ui', 'isIdle']) Object.defineProperty(h.ctx, name, { get: stale });
+    const adapter = new h.api.PiAdapter(h.pi, 'runtime-2'); await adapter.probe();
+    const journal = new h.api.OperationJournal(h.directory, 'runtime-2');
+    next = new h.api.OperationRuntime(adapter, journal, result => h.sent.push(plain(result)));
+    await next.open(); h.cleanup.push(() => journal.close());
+    await next.enqueue({ type: 'query', id: request.id });
+    options.beforeCallback?.(next, h);
+    if (options.failAfterShutdown) throw new Error('Replacement failed before callback');
+    await config.withSession(fresh);
+    return { cancelled: false };
+  };
+  const request = { ...h.request(), method: 'conversation.forkAtTurn', params: { targetEntryId: 'u2', turnLeafId: 'a2' } };
+  const result = async () => {
+    for (let i = 0; i < 250; i++) {
+      const runtime = next ?? h.runtime;
+      await runtime.enqueue({ type: 'query', id: request.id });
+      if (h.sent.some(r => r.id === request.id && ['succeeded', 'failed', 'cancelled'].includes(r.status))) return h.waitResult(request.id);
+      await new Promise(resolve => setTimeout(resolve, 5));
+    }
+    throw new Error('Fork result did not settle');
+  };
+  return { ...h, forks, request, result, next: () => next, staleReads: () => staleReads, original };
+}
+
+test('fork uses complete tool turn, fresh callback and original id after replacement', async t => {
+  const h = await forkHarness(t, { beforeCallback: (next, h) => {
+    assert.ok(next.lock); assert.equal(h.sent.at(-1).status, 'running');
+    assert.ok(!h.sent.some(r => r.status === 'succeeded'));
+  } });
+  await h.runtime.enqueue(h.request);
+  const response = await h.result();
+  assert.equal(response.status, 'succeeded'); assert.equal(response.effect, 'applied');
+  assert.deepEqual(h.forks, [{ leaf: 'a2', position: 'at' }]);
+  assert.deepEqual(response.context.afterSnapshot.branch.entries, h.original.slice(0, 6));
+  assert.equal(response.context.currentSnapshot.session.id, 'replacement');
+  assert.equal(h.staleReads(), 0); assert.equal(h.editor(), ''); assert.equal(h.modelPrompts(), 0);
+  await h.next().enqueue(h.request); assert.equal(h.forks.length, 1);
+  await h.next().enqueue({ ...h.request, params: { ...h.request.params, turnLeafId: 'tool' } });
+  assert.equal(h.sent.at(-1).error.code, 'ID_CONFLICT');
+});
+
+test('replacement may append native startup settings metadata after the verified turn', async t => {
+  const h = await forkHarness(t, { alter: (_ctx, h) => h.setBranch([...h.current(),
+    { id: 'thinking', parentId: 'a2', type: 'thinking_level_change', thinkingLevel: 'off' }]) });
+  await h.runtime.enqueue(h.request);
+  const result = await h.result();
+  assert.equal(result.status, 'succeeded'); assert.equal(result.context.afterSnapshot.branch.leafId, 'thinking');
+  assert.equal(result.data.turnLeafId, 'a2'); assert.equal(h.staleReads(), 0);
+});
+
+test('cancelled fork produces a durable terminal without replacing or trimming', async t => {
+  const h = await forkHarness(t, { cancel: true }); await h.runtime.enqueue(h.request);
+  const result = await h.result();
+  assert.equal(result.status, 'cancelled'); assert.equal(result.effect, 'none');
+  assert.deepEqual(h.current(), h.original); assert.equal(h.next(), undefined); assert.equal(h.forks.length, 1);
+  assert.equal((await h.journal.read(h.request.id)).response.status, 'cancelled');
+});
+
+test('fork rejects wrong turn leaf, labels, stale observations and busy before replacement', async t => {
+  for (const condition of ['leaf', 'labels', 'stale', 'busy']) {
+    const h = await forkHarness(t);
+    if (condition === 'leaf') h.request.params.turnLeafId = 'call';
+    if (condition === 'labels') h.ctx.sessionManager.getEntries = () => [{ type: 'label' }];
+    if (condition === 'stale') h.setBranch(h.current().slice(0, 3));
+    if (condition === 'busy') h.setBusy(true);
+    await h.runtime.enqueue(h.request);
+    const result = await h.result(); assert.equal(result.status, 'failed'); assert.equal(result.effect, 'none');
+    assert.equal(h.forks.length, 0);
+  }
+});
+
+test('wrong replacement branch, parent or editor is unknown and never reported as success', async t => {
+  for (const alter of [(_ctx, h) => h.setBranch(h.current().slice(0, 3)),
+    ctx => { ctx.sessionManager.getHeader = () => ({ version: 3, parentSession: '/unrelated.jsonl' }); },
+    ctx => { ctx.ui = { getEditorText: () => 'changed editor' }; }]) {
+    const h = await forkHarness(t, { alter }); await h.runtime.enqueue(h.request);
+    const result = await h.result(); assert.equal(result.status, 'failed'); assert.equal(result.effect, 'unknown');
+    assert.equal(h.staleReads(), 0); assert.equal(h.forks.length, 1);
+    await h.next().enqueue(h.request); assert.equal(h.forks.length, 1);
+  }
+});
+
+test('replacement exception and terminal disk failure cannot rerun fork', async t => {
+  const failed = await forkHarness(t, { failAfterShutdown: true }); await failed.runtime.enqueue(failed.request);
+  assert.equal((await failed.result()).effect, 'unknown'); assert.equal(failed.staleReads(), 0);
+  const h = await forkHarness(t);
+  const write = h.api.OperationJournal.prototype.writeExclusive;
+  h.api.OperationJournal.prototype.writeExclusive = function(file, value) {
+    if (file.endsWith('.terminal')) throw new Error('Disk unavailable');
+    return write.call(this, file, value);
+  };
+  await h.runtime.enqueue(h.request);
+  for (let i = 0; i < 100 && !h.next(); i++) await new Promise(r => setTimeout(r, 5));
+  assert.ok(h.next()); await h.next().enqueue({ type: 'query', id: h.request.id });
+  assert.equal(h.sent.at(-1).status, 'running'); assert.equal(h.sent.at(-1).executionEnded, false);
+  await h.next().enqueue(h.request); assert.equal(h.forks.length, 1);
+});
+
+test('fork preserves a nonempty target TUI draft by rejecting before any replacement', async t => {
+  const h = await harness(t);
+  let calls = 0; h.ctx.fork = async () => { calls++; return { cancelled: false }; };
+  const request = { ...h.request(), method: 'conversation.forkAtTurn', params: { targetEntryId: 'u2', turnLeafId: 'a2' } };
+  await h.runtime.enqueue(request);
+  const response = await h.waitResult(request.id);
+  assert.equal(response.error.code, 'BUSY'); assert.equal(response.effect, 'none'); assert.equal(calls, 0);
+  assert.equal(h.editor(), 'unsent TUI draft 🐈');
+});
+
+test('target editor edits during handoff fsync reject before invoking fork', async t => {
+  const h = await forkHarness(t), handoff = h.journal.handoff.bind(h.journal);
+  h.journal.handoff = async (...args) => {
+    const config = await handoff(...args); h.setEditor('typed while ticket was saved'); return config;
+  };
+  await h.runtime.enqueue(h.request);
+  const result = await h.result();
+  assert.equal(result.status, 'failed'); assert.equal(result.effect, 'none'); assert.equal(result.error.code, 'BUSY');
+  assert.equal(h.forks.length, 0); assert.equal(h.editor(), 'typed while ticket was saved');
+});
 
 test('public command probe does not change TUI draft or issue a model prompt', async t => {
   const h = await harness(t);
@@ -298,24 +435,20 @@ test('framing keeps split UTF-8 and Unicode separators; reconnect does not repla
   await Promise.race([done, new Promise((_, reject) => setTimeout(() => reject(new Error('Reconnect timeout')), 5000).unref())]);
   assert.equal(observed[0].text, '你好\u2028\u2029'); assert.equal(executions, 1);
 });
-test('legacy fork retains the complete tool-assisted turn and rejects ambiguous fallback', async () => {
-  const sent = [], commands = new Map(), handlers = new Map(), calls = [], notices = [];
+test('legacy controls are consumed without command registration; v1 notifications remain', async () => {
+  const sent = [], commands = new Map(), handlers = new Map(), notices = [];
   const fakeNet = { connect: () => ({ setTimeout() {}, destroy() {}, end: payload => sent.push(JSON.parse(payload)),
     on(event, callback) { if (event === 'connect') callback(); return this; } }) };
   const api = module({}, fakeNet);
   api.install({ registerCommand: (name, command) => commands.set(name, command),
     on(name, handler) { if (!handlers.has(name)) handlers.set(name, []); handlers.get(name).push(handler); } });
-  let entries = structuredClone(branch);
-  const ctx = { sessionManager: { getBranch: () => entries },
-    fork: async (id, options) => { calls.push([id, options.position]); return { cancelled: false }; },
-    ui: { notify: (text, level) => notices.push({ text, level }) } };
-  const args = (index, text) => `${index} ${Buffer.from(text).toString('base64')}`;
-  await commands.get('bridge-fork').handler(args(1, 'two'), ctx);
-  assert.deepEqual(calls, [['a2', 'at']]);
-  entries[6].message.content = 'two';
-  await commands.get('bridge-fork').handler(args(99, 'two'), ctx);
-  assert.equal(calls.length, 1); assert.ok(notices.some(n => n.text.includes('ambiguous')));
-  assert.ok(!commands.has('bridge-rewind')); // no Terminal control fallback
+  const ctx = { ui: { notify: (text, level) => notices.push({ text, level }) } };
+  assert.ok(!commands.has('bridge-fork')); assert.ok(!commands.has('bridge-rewind'));
+  for (const text of ['/bridge-fork 1 dHdv', '/bridge-rewind 1 dHdv']) {
+    const result = handlers.get('input')[0]({ text }, ctx);
+    assert.equal(result.action, 'handled');
+  }
+  assert.equal(notices.length, 2);
   const emit = async (name, event) => { for (const h of handlers.get(name) ?? []) await h(event, ctx); };
   await emit('agent_start', {});
   await emit('agent_end', { messages: [{ role: 'assistant', stopReason: 'error' }] });

@@ -46,10 +46,10 @@ IDEA（PiBridgeServer，loopback TCP + token）
 Terminal 标签页 ── ~/.pi/agent/extensions/pi-launcher-bridge.ts（懒安装，按完整内容比对更新）
 ```
 
-- 托管 extension（VERSION **8**）仍运行在同一个交互式 TUI 进程里；v2 认证长连接传输请求、结果和完整原生活跃分支快照，不使用 RPC mode 或另起 pi 进程。
-- Rewind 的 API 基线锁定 **pi 1.5.0 / session v3**，还需通过内部命令 probe 并声明 capability；不支持的版本关闭控制操作。这份开发实现仍待 CI、真实 TUI 和 IDE 集成验收。
-- Rewind 请求先落盘、只发送一次。断联和超时保留面板原状，只查询原 requestId；重连不重放修改。确认旧执行结束后，可用 `Sync` 显式对账当前状态。
-- working/model/写文件通知和面板 Fork 暂时保留 v1；v2 接管过的 tab 不会再被迟到的 v1 会话事件换绑。开发契约见[通信协议](docs/bridge-protocol.md)。
+- 托管 extension（VERSION **9**）仍运行在同一个交互式 TUI 进程里；v2 认证长连接传输请求、结果和完整原生活跃分支快照，不使用 RPC mode 或另起 pi 进程。
+- Rewind / Fork 的 API 基线锁定 **pi 1.5.0 / session v3**，还需通过内部命令 probe 并声明 capability；不支持的版本关闭控制操作。本轮 Fork 迁移仍待 CI、真实 TUI 和 IDE 集成验收。
+- 修改请求先落盘、只发送一次。断联和超时保留面板原状，只查询原 requestId；重连不重放修改。确认旧执行结束后，可用 `Sync` 显式对账当前状态。
+- working/model/写文件通知暂时保留 v1；Fork / Rewind 都经 v2 操作。v2 接管过的 tab 不会再被迟到的 v1 会话事件换绑。开发契约见[通信协议](docs/bridge-protocol.md)。
 
 ## 使用方式
 
@@ -75,10 +75,14 @@ Pi 标签页是**真实终端里跑着完整的 pi TUI** —— 所有斜杠命�
 
 面板里每条用户消息卡片还带一个 **Fork** 按钮（分支图标）：新建会话 `<原会话>-fork`，
 保留**到该消息（含其回复）为止**的历史、其后全部丢弃，输入框留空，从这个点在新会话里
-继续追问，原会话不受影响。插件先以 `--fork <session>` 拉起包含全量历史的新终端，
-首次 bridge bind 后等待 TUI 启动，再只发送一次 `/bridge-fork`；之后 IDEA 每 1.5 秒只读检查
-绑定的 session id，最多 6 次。id 变化即确认 fork 成功，否则记录超时。检查不会重发命令，
-也不会反复写入 TUI 输入栏。
+继续追问，原会话不受影响。插件先以 CLI 创建独立的全量副本 Terminal，等待 bridge 能力和
+完整快照就绪，再按原生 entry 身份核对选中的完整 turn。随后仅提交一次 v2 分叉请求，
+通过公开 API 在该轮最后一个 entry 分叉，包含工具调用、工具结果和最终回复。
+新会话经耐久 handoff 确认完整分支后，面板才裁剪；中间副本不会归档成额外会话。
+
+Fork 会拒绝忙碌会话、有歧义的旧卡片、带 label 的会话，以及目标 TUI 输入框已有内容的情况。
+源 Terminal 和 IDEA 草稿保留。准备期间可点 **Sync** 停止并保留全量副本；请求提交后，
+断联只查询原操作 ID，不重复拉起 Terminal 或再次 fork。失败或未知时保留副本供检查。
 
 **Rewind** 按钮（撤销图标，位于 Fork 左侧）经双向 bridge 在同一 session 内导航。
 面板保留原状，收到 pi 确认结果并核验完整分支快照后才更新；选中的用户消息及后续对话
@@ -93,11 +97,8 @@ pi 忙碌、首条消息无 parent，或 parent 是另一条 user/custom message
 有歧义的旧卡片保留且禁用回退。首次迁移保留原面板可见性，因此迁移前仅在 TUI 输入的历史
 也可能继续在面板隐藏；初始化后的新 TUI 用户消息会正常显示。
 
-Fork 的截点仍是下一条用户消息之前的最后一个 entry，包含整轮工具调用、工具结果和最终回复。
-**面板 Fork 尚未迁移 v2**：保留 CLI 副本 + 单次 Terminal 命令流程，失败时仍可能留下全量副本。
-
 验证入口：`node --test tests/bridge-extension.test.mjs`、Gradle `test`，以及显式运行的
-`PI_BINARY=/path/to/pi python3 tests/bridge-tui-smoke.py`（真实 pi 1.5.0 PTY smoke）。
+`PI_BINARY=/path/to/pi python3 tests/bridge-tui-smoke.py`（真实 pi 1.5.0 PTY smoke，覆盖 rewind 与 fork 的运行时替换）。
 CI 手动触发可勾选 `tui_smoke`。本次重构仍需执行这些验证，不能把源码交付视为兼容性已通过。
 安装按资源全文比较更新，新 Terminal 或 pi `/reload` 后加载。
 

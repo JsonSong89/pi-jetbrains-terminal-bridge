@@ -1,8 +1,8 @@
 # Pi ↔ IDEA 桥接实现与开发约定（0.3.5 内测）
 
 > 本文描述双向操作重构后的源码；编译、真实 TUI 和 IDE 端验收尚待执行。
-> 插件版本仍为 0.3.5；托管 extension VERSION=8。正式 wire 契约见 [bridge-protocol.md](../bridge-protocol.md)，实施决策见 [双向操作通道与回退确认](../plans/2026-11-04-2114——双向操作通道与回退确认.md)。
-> 本文取代旧的 v1 单向实现说明。Fork 的旧流程明确保留，不能据此宣称已经迁移到 v2。
+> 插件版本仍为 0.3.5；托管 extension VERSION=9。正式 wire 契约见 [bridge-protocol.md](../bridge-protocol.md)，实施决策见 [双向操作通道与回退确认](../plans/2026-11-04-2114——双向操作通道与回退确认.md)。
+> 公共通道、Rewind 和 ForkWorkflow 的 wire 契约统一使用 v2；v1 仅保留状态/模型/写文件通知。本轮 Fork 代码仍待编译与真实 TUI / IDE 验证。
 
 ## 1. 产品结构
 
@@ -29,9 +29,10 @@ PiConversationPanel
 | `BridgeProtocol` / `SessionSnapshot` | 通用 JSON DTO、LF framing、原生分支校验与用户投影读取；未知 entry 字段保留 |
 | `PiBridgeServer` | loopback 监听、token/tab 校验、v1/v2 分流、单一活动连接 |
 | `BridgeConnection` | 认证连接绑定、后台读写、心跳、发送预算、断联 |
-| `BridgeOperations` / `OperationHandle` | 请求关联、耐久收件、原 ID 查询、稳定 tab 锁、只读结果订阅 |
+| `BridgeOperations` / `OperationHandle` | 本地 preparation reservation、请求关联、耐久收件、原 ID 查询、稳定 tab 锁、只读结果订阅 |
 | `OperationStore` | 本地请求与业务 checkpoint 原子写入、容量保护 |
 | `ConversationOperations` | rewind 意图、业务提交、草稿保护、显式对账 |
+| `ForkWorkflow` / `ForkPolicy` | 独立 Terminal 准备、原生 turn / 副本身份核验、结果提交策略 |
 | `ConversationProjection` / `ConversationCommitPolicy` | 无 IDE 依赖的历史迁移、隐藏记录和提交前置条件 |
 | extension `Transport` | JSONL 长连接、重连与背压，无请求重放队列 |
 | extension `OperationRuntime` | descriptor registry、intent/终态、去重、查询、handoff 协调 |
@@ -53,7 +54,7 @@ extension 在 `session_start` 之后派发唯一内部命令完成 probe，再�
 - 网络解析与日志在后台；IDE reader 等待后台消费，快照/UI 通知合并，避免 EDT 队列无限堆积。
 - 同时出现第二个活动 runtime 不直接接管；旧 socket 关闭后可重连。未知操作仍保留原请求身份与锁。
 
-v1 短连接事件暂保留，用于 working/idle、模型、写文件通知及旧 Fork。按 `(tabKey,type)` 的 seq 去重；每个事件短暂失败时重试一次。v2 接管过的 tab，即使断联，旧 v1 `session_changed/stopped` 也不能抢先换绑或归档。
+v1 短连接事件暂保留，用于 working/idle、模型、写文件通知。按 `(tabKey,type)` 的 seq 去重；每个事件短暂失败时重试一次。v2 接管过的 tab，即使断联，旧 v1 `session_changed/stopped` 也不能抢先换绑或归档。
 
 v2 快照是该 tab 会话绑定与分支投影的单一入口。agent 完成通知另用 v1 状态转换记录，避免快照同步吞掉 error/abort 通知。
 
@@ -125,19 +126,22 @@ pi-terminal-bridge/<project-hash>/
 
 通用 handoff 在执行前写不可变 ticket，绑定原 id/digest/稳定 tab/预期替换证据；公开 `withSession` 回调仅用新 ctx 核验，再以独立的排他终态文件完成单写者交接。新 runtime 查询原请求并验证 ticket/nonce/digest 后报告结果，旧 ctx/socket/pending map 不复用。新 hello 可以早于终态，不能作为成功证明。
 
-目前只有通用交接契约及其测试入口；面板 ForkWorkflow 与真实 `ctx.fork(withSession)` 集成留到后续。
+ForkWorkflow 已使用通用交接：只捕获 ticket 配置和原生核验证据，回调中使用新 ctx。旧运行时仍存活的取消/执行前失败也写 ticket terminal；替换后异常记录 failed/effect unknown，不能冒充取消或重放。ticket/terminal 先 fsync 临时文件，再以排他硬链接原子发布；读取 terminal 时同步目录，防止读到半写文件或未经同步的结果。
 
-## 8. 保留的 Fork 流程
+## 8. ForkWorkflow
 
-源会话不变；新 Terminal 用 `--fork <source> --session-id <new>` 创建完整副本。首次 session bind 后，旧流程等 3s，只发送一次 `/bridge-fork <panel-index> <base64-text>`；extension 找到所选 user 的完整 turn leaf，调用 `ctx.fork(leaf,{position:"at"})`。
+1. 源 tab 必须具备 fork capability、完整稳定快照、准确 user entryId，且没有未决操作或忙碌。
+2. 新目标继承完整源卡片视图和隐藏状态，草稿为空；没有提前 subList 裁剪。
+3. 在普通操作日志中先保存 `preparing` reservation（还没有 request），内容包括目标身份/初始视图、源原生文件路径、目标 entryId 与完整 turn branch。
+4. 耐久发布后只启动一次目标 Terminal：`--fork <原生文件完整路径> --session-id <目标id>`。等待快照/能力事件，不用延迟或轮询 session id。准备期点击 Sync 可停止并保留副本；点击/恢复不会另起目标进程。
+5. 目标快照核对原生 turn entries 前缀与源完全一致；只允许其后附带启动 session_info/model/thinking 元数据。复制身份变化、内容变化、busy 或不支持 capability 时不发修改请求。
+6. 同一 reservation id 一次性转成 `conversation.forkAtTurn/1`，参数 `{targetEntryId,turnLeafId}`，复用耐久 intent / 结果 / query。
+7. PiAdapter 在新鲜命令上下文重新核对观察/截止时间/完整 turn leaf。目标必须持久、无 label、TUI editor 为空；公开 API 的 label 重建与 callback 后清空 editor 行为决定这些前置限制。
+8. durable handoff 后调 `ctx.fork(leaf,{position:"at",withSession})`，新 ctx 验证新 session/file、parentSession、完整 branch 和空 editor，记录终态。新 hello 本身不释放锁。
+9. IDEA 取得耐久成功结果及兼容当前快照后，重绑卡片/隐藏身份，投影确认分支；只更新目标，不归档中间全量副本。等待时编辑的新草稿保持原样。
+10. 已发送或可能已发送只查询原 id。IDE 重开后的未发送 preparation 标为 not_sent，不重新启动或执行；缺 XML 的未决目标可由操作记录重建。checkpoint 支持在 XML 尚未持久化时恢复已确认替换身份与视图。
 
-- 保留该 user、全部工具调用/结果与最终回复，排除后续 user turn；新输入为空。
-- index+文本匹配失败时只接受唯一文本匹配，歧义拒绝。
-- 取消结果检查，成功替换后不再使用旧 ctx 发通知。
-- IDEA 仍每 1.5s 检查绑定 id，最多 6 次；超时不重发命令。
-- 旧流程仍有固定延迟、Terminal 命令输入、提前裁面板等局限；不能将它描述为 v2 可靠操作。
-
-后续迁移需要 ForkWorkflow 等待能力/目标快照、核对复制 entry 身份，再使用通用 request/result/handoff，不能直接在源 Terminal fork。
+旧 `/bridge-fork` handler、base64/文本回退定位、固定 3s 启动延迟、1.5s/6 次结果轮询、forkingIds/session_changed 特判全部删除。过期命令只有 input 拦截，不会进入模型。失败或未知保留全量副本/当前树供用户检查；带 label 的会话需后续适配。
 
 ## 9. 启动与其他功能
 
@@ -149,15 +153,15 @@ pi-terminal-bridge/<project-hash>/
 - Windows 注入 PowerShell `$env:` 或 POSIX `env`，cmd.exe 跳过并警告；推荐 pwsh 7。
 - session 冲突 Extra arguments 在启动时清洗；插件版本与 tag 只在发布流程中改。
 - rename 禁止重名；删除会话不删除 jsonl。
-- 普通草稿仍走 bracketed paste + 80ms 后 Enter；只有控制操作 rewind 已脱离这条路径。
+- 普通草稿仍走 bracketed paste + 80ms 后 Enter；Rewind / Fork 控制操作均走 bridge。
 - tool_result 上报 edit/write/patch/apply 的路径，后台刷新 VFS，可选在 EDT 打开文件；agent 完成通知默认关闭。
 - 面板历史的折叠、滚动锚点、消息轨道和快捷键保持。
 
 ## 10. 验证入口与未决项
 
 - `node --test tests/bridge-extension.test.mjs`：执行打包资源，覆盖 registry、快照、busy/取消/歧义、重复 ID、日志/断联/重启、执行结束证据、handoff、背压/framing 和保留的 v1 行为。
-- `./gradlew test`：JVM framing、原生快照、隐藏/迁移、草稿/视图提交前置条件。
-- `PI_BINARY=/path/to/pi python3 tests/bridge-tui-smoke.py`：隔离目录和配置，用 PTY 启动真实 pi 1.5.0，核验 probe、rewind、TUI 编辑器及零 prompt/model 事件。只操作临时 fixture，不使用 RPC。
+- `./gradlew test`：JVM framing、原生快照、隐藏/迁移、草稿/视图提交前置条件，以及完整 turn / 副本身份 / fork 提交策略。
+- `PI_BINARY=/path/to/pi python3 tests/bridge-tui-smoke.py`：隔离目录和配置，用 PTY 启动真实 pi 1.5.0，核验 probe、rewind、CLI 副本内 fork / 新实例交接、TUI 编辑器及零 prompt/model 事件。只操作临时 fixture，不使用 RPC。
 - GitHub CI 默认执行 Node 契约测试与 `test buildPlugin`；workflow_dispatch 可勾选 `tui_smoke` 安装固定 pi 版本执行真实 TUI smoke。手动 dev 构建不发布。
 
-本地依仓库约定只做静态检查，不运行 Gradle、单测或真实 TUI smoke；这些测试的存在不代表通过。发布前仍需真实长会话资源预算、IDE 断联/重开与本地提交崩溃窗口、用户实际发行版，以及 fork/withSession 生命周期验收。
+本地依仓库约定只做静态检查，不运行 Gradle、单测或真实 TUI smoke；这些测试的存在不代表通过。发布前仍需真实长会话资源预算、IDE 断联/重开与本地提交崩溃窗口、用户实际发行版，以及 fork 的真实 withSession 生命周期与 label 适配验收。
