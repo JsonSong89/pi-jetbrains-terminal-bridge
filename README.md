@@ -115,7 +115,8 @@ it never repeats the operation. **Restore text** is also a conditional toolbar
 icon. Hover over an icon to see its action. The lower-left workspace-files action
 uses a compact icon button.
 
-Cards are bound to native session/entry ids and offer Rewind, Fork and Copy.
+Cards are bound to native session/entry ids. Rewind, Fork and Copy appear in the
+card header on hover.
 Use Rewind to adjust the active history. Existing hidden records remain compatible.
 Ambiguous old cards stay
 unbound and cannot be rewound. The first migration preserves the old panel's

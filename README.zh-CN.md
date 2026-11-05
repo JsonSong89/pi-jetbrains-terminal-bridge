@@ -96,7 +96,7 @@ pi 忙碌、首条消息无 parent，或 parent 是另一条 user/custom message
 输入框左下角的 Workspace 使用无边框小图标。未知期间可以查看、复制和编辑草稿，
 同一会话的冲突修改会被锁住。
 
-卡片使用原生 session/entry id 绑定，只保留 Rewind、Fork、Copy；通过 Rewind 调整活跃历史。
+卡片使用原生 session/entry id 绑定；鼠标悬停时，卡片头部显示 Rewind、Fork、Copy；通过 Rewind 调整活跃历史。
 旧隐藏记录继续兼容，避免以前隐藏的卡片重新出现。
 有歧义的旧卡片保留且禁用回退。首次迁移保留原面板可见性，因此迁移前仅在 TUI 输入的历史
 也可能继续在面板隐藏；初始化后的新 TUI 用户消息会正常显示。
