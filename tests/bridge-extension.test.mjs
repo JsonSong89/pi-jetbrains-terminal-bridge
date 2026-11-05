@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 // Run the packaged artifact. Only the host-provided version import and build placeholder change.
 const source = readFileSync(new URL('../src/main/resources/bridge/pi-launcher-bridge.ts', import.meta.url), 'utf8')
   .replace('import { VERSION as PI_VERSION } from "@earendil-works/pi-coding-agent";', 'const PI_VERSION = "1.5.0";')
-  .replace('@EXTENSION_VERSION@', '9').replace('export default function (pi)', 'function install(pi)');
+  .replace('@EXTENSION_VERSION@', '10').replace('export default function (pi)', 'function install(pi)');
 const plain = v => JSON.parse(JSON.stringify(v));
 const message = (id, parentId, role, content) => ({ id, parentId, type: 'message', message: { role, content, timestamp: 1 } });
 const branch = [message('u1', null, 'user', 'one'), message('a1', 'u1', 'assistant', 'reply'),

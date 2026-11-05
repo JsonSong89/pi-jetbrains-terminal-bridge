@@ -452,7 +452,12 @@ class OperationRuntime {
       (terminal(result) && ["none", "applied", "unknown"].includes(result.effect) && (result.status !== "succeeded" || result.effect !== "unknown")),
       verify: (_ctx, _before, result) => result, ...descriptor });
   }
-  async open() {
+  open() {
+    // Idempotent: requests may arrive while the lease/records are still loading.
+    if (!this.opening) this.opening = this.load();
+    return this.opening;
+  }
+  async load() {
     for (const record of await this.journal.open()) {
       this.records.set(record.id, record);
       if (!terminal(record.response) && !record.reconciled) this.lock = record.id; // Never resume an intent after reload/crash.
@@ -460,7 +465,9 @@ class OperationRuntime {
   }
   enqueue(message) {
     // Serialize registration/dedup/log I/O, but do not block query/ping behind a navigation dialog.
-    const task = this.chain.then(() => this.receive(message));
+    // Serve nothing before the journal is open: a racing request could otherwise
+    // miss its durable record and dispatch the same intent twice.
+    const task = this.chain.then(() => this.opening ?? Promise.resolve()).then(() => this.receive(message));
     this.chain = task.catch(() => {});
     return task;
   }
