@@ -107,8 +107,10 @@ Rewind is rejected while pi is busy, for a root message without a parent, or
 when the parent is another user/custom message: those targets could otherwise
 move to the wrong point or change the TUI editor. If you edit the IDEA draft
 while waiting, it is preserved and the selected text is available through
-**Restore text**. **Sync** refreshes state, or explicitly reconciles unresolved
-results once execution is confirmed ended; it never repeats the rewind.
+**Restore text**. The input bar also shows a quiet `user/assistant+tool` count
+from the latest subscribed v2 branch snapshot. **Sync** refreshes state, or
+explicitly reconciles unresolved results once execution is confirmed ended; it
+never repeats the rewind.
 
 Cards are bound to native session/entry ids. Removing a card stores a local
 hidden record, so later snapshots keep it hidden. Ambiguous old cards stay

@@ -112,6 +112,26 @@ class BridgeContractTest {
         assertTrue(ConversationCommitPolicy.mayRestoreDraft(2, 2))
     }
 
+    @Test fun `branch counts split user prompts from assistant and tool entries`() {
+        val entries = listOf(
+            mapOf("id" to "u0", "parentId" to null, "type" to "message", "message" to mapOf("role" to "user", "content" to "one")),
+            mapOf("id" to "a0", "parentId" to "u0", "type" to "message", "message" to mapOf("role" to "assistant", "content" to "ok")),
+            mapOf("id" to "u1", "parentId" to "a0", "type" to "message", "message" to mapOf("role" to "user", "content" to "two")),
+            mapOf("id" to "call", "parentId" to "u1", "type" to "message", "message" to mapOf("role" to "assistant", "content" to "tool")),
+            mapOf("id" to "tool", "parentId" to "call", "type" to "message", "message" to mapOf("role" to "toolResult", "content" to "out")),
+            mapOf("id" to "a1", "parentId" to "tool", "type" to "message", "message" to mapOf("role" to "assistant", "content" to "done")),
+            mapOf("id" to "note", "parentId" to "a1", "type" to "custom_message", "content" to "hidden")
+        )
+        val s = SessionSnapshot(BridgeProtocol.gson.toJsonTree(mapOf(
+            "snapshotId" to "snapshot", "capturedAt" to "diagnostic", "complete" to true, "consistency" to "stable",
+            "session" to mapOf("id" to "session"), "branch" to mapOf("leafId" to "note", "entries" to entries),
+            "state" to mapOf("idle" to true), "source" to mapOf("runtimeId" to "runtime", "piVersion" to "1.5.0")
+        )).asJsonObject)
+        assertTrue(s.usable)
+        assertEquals(SessionSnapshot.BranchCounts(2, 4), s.counts())
+        assertEquals(SessionSnapshot.BranchCounts(1, 0), snapshot("one").counts())
+    }
+
     @Test fun `projection preserves draft and restores no off-branch bound messages`() {
         val old = PiUserMessage("one", 1, "session", "u0")
         val c = conversation(old, PiUserMessage("two", 2, "session", "u1"))

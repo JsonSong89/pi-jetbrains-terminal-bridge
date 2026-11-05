@@ -145,6 +145,13 @@ class PiConversationService(private val project: Project) {
         models[id ?: activeId]
     }
 
+    /** Latest subscribed v2 branch counts; null until a usable snapshot for this session arrives. */
+    fun branchCounts(id: String): SessionSnapshot.BranchCounts? {
+        val snapshot = bridge.snapshot(id) ?: return null
+        if (!snapshot.usable || snapshot.sessionId != get(id)?.piSessionId) return null
+        return snapshot.counts()
+    }
+
     fun createConversation(): PiConversation {
         val n = store().nextTitleSeq()
         val title = "Pi-$n-${LocalDateTime.now().format(TITLE_TIME_FORMAT)}"
@@ -214,6 +221,7 @@ class PiConversationService(private val project: Project) {
             restoreTerminal(conversation.id)
         } else {
             terminal().selectTab(conversation.id, requestFocus = false)
+            bridge.requestSnapshot(conversation.id)
             notifyListeners(ChangeEvent(ChangeKind.STRUCTURE, id))
         }
     }

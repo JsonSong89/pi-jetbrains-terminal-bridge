@@ -87,6 +87,12 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
     private val conversations = PiConversationService.getInstance(project)
     private val combo = ComboBox<PiConversation>()
     private val statusLabel = JBLabel()
+    private val branchCountLabel = JBLabel().apply {
+        font = JBUI.Fonts.smallFont()
+        foreground = JBUI.CurrentTheme.ContextHelp.FOREGROUND
+        border = JBUI.Borders.empty(0, 4, 0, 8)
+        isVisible = false
+    }
     private val historyList = JPanel()
     private val historyScroll = JBScrollPane()
     private val messageRail = PiMessageRail()
@@ -327,6 +333,7 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
 
         val buttonRow = JPanel(BorderLayout()).apply {
             add(JPanel(FlowLayout(FlowLayout.LEFT, 4, 4)).apply {
+                add(branchCountLabel)
                 add(copyWorkspaceButton)
             }, BorderLayout.WEST)
             add(JPanel(FlowLayout(FlowLayout.RIGHT, 4, 4)).apply {
@@ -420,6 +427,17 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
             val hasActive = active != null
             sendButton.isEnabled = hasActive && !conversations.hasPendingOperation(active!!.id)
             reconcileButton.isEnabled = hasActive
+            val counts = active?.let { conversations.branchCounts(it.id) }
+            if (counts == null) {
+                branchCountLabel.isVisible = false
+                branchCountLabel.text = ""
+                branchCountLabel.toolTipText = null
+            } else {
+                branchCountLabel.isVisible = true
+                branchCountLabel.text = "${counts.users}/${counts.model}"
+                branchCountLabel.toolTipText =
+                    "Active Pi branch · ${counts.users} user messages · ${counts.model} assistant/tool entries"
+            }
             recoveryButton.isVisible = !active?.recoveryText.isNullOrEmpty()
             copyInputButton.isEnabled = hasActive
             copyWorkspaceButton.isEnabled = hasActive

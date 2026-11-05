@@ -99,4 +99,21 @@ data class SessionSnapshot(val raw: JsonObject) {
         UserEntry(BridgeProtocol.string(e, "id").orEmpty(), text,
             runCatching { m.get("timestamp")?.asLong }.getOrNull() ?: 0L)
     }
+
+    data class BranchCounts(val users: Int, val model: Int)
+    /** User prompts versus assistant/tool-result entries on the active native branch. */
+    fun counts(): BranchCounts {
+        var users = 0
+        var model = 0
+        for (element in entries) {
+            val e = element.asJsonObject
+            val type = BridgeProtocol.string(e, "type")
+            val role = BridgeProtocol.string(e.get("message")?.takeIf { it.isJsonObject }?.asJsonObject, "role")
+            when {
+                type == "message" && role == "user" -> users++
+                type == "toolResult" || role == "assistant" || role == "toolResult" -> model++
+            }
+        }
+        return BranchCounts(users, model)
+    }
 }
