@@ -5,21 +5,17 @@ import com.intellij.util.ui.JBUI
 import java.awt.AlphaComposite
 import java.awt.BorderLayout
 import java.awt.Component
-import java.awt.Container
 import java.awt.Dimension
 import java.awt.Graphics
 import java.awt.Graphics2D
 import java.awt.RenderingHints
 import java.awt.event.FocusAdapter
 import java.awt.event.FocusEvent
-import java.awt.event.MouseAdapter
-import java.awt.event.MouseEvent
 import java.awt.geom.RoundRectangle2D
 import javax.swing.Icon
 import javax.swing.JButton
 import javax.swing.JComponent
 import javax.swing.JPanel
-import javax.swing.SwingUtilities
 import javax.swing.Timer
 
 private inline fun Graphics.antialiased(paint: (Graphics2D) -> Unit) {
@@ -62,34 +58,13 @@ internal class PiIconButton(icon: Icon) : JButton(icon) {
     }
 }
 
-/** Keeps its space while hidden, so revealing the content never moves the layout. */
-private class RevealPanel(content: JComponent) : JPanel(BorderLayout()) {
-    var revealed = false
-        set(value) {
-            if (field != value) {
-                field = value
-                repaint()
-            }
-        }
-
-    init {
-        isOpaque = false
-        add(content, BorderLayout.CENTER)
-    }
-
-    override fun paintChildren(g: Graphics) {
-        if (revealed) super.paintChildren(g)
-    }
-}
-
-/** Rounded history card: a header with hover actions, the body text and an optional footer. */
+/** Rounded history card: time, body text, then the expand link and always-visible actions. */
 internal class PiHistoryCard(
     val body: JBTextArea,
     time: JComponent,
     actions: JComponent,
-    footer: JComponent?
+    expand: JComponent?
 ) : JPanel(BorderLayout()) {
-    private val revealActions = RevealPanel(actions)
     private var flashAlpha = 0f
     private var flashTimer: Timer? = null
 
@@ -97,29 +72,13 @@ internal class PiHistoryCard(
         isOpaque = false
         alignmentX = Component.LEFT_ALIGNMENT
         border = PiPanelStyle.cardBorder
+        add(time, BorderLayout.NORTH)
+        add(body, BorderLayout.CENTER)
         add(JPanel(BorderLayout()).apply {
             isOpaque = false
-            add(time, BorderLayout.WEST)
-            add(revealActions, BorderLayout.EAST)
-        }, BorderLayout.NORTH)
-        add(body, BorderLayout.CENTER)
-        footer?.let { add(it, BorderLayout.SOUTH) }
-        trackHover(this, object : MouseAdapter() {
-            override fun mouseEntered(e: MouseEvent) {
-                revealActions.revealed = true
-            }
-
-            // Moving onto a child also exits the parent; only leaving the visible card hides.
-            override fun mouseExited(e: MouseEvent) {
-                val point = SwingUtilities.convertPoint(e.component, e.point, this@PiHistoryCard)
-                revealActions.revealed = this@PiHistoryCard.visibleRect.contains(point)
-            }
-        })
-    }
-
-    private fun trackHover(component: Component, listener: MouseAdapter) {
-        component.addMouseListener(listener)
-        (component as? Container)?.components?.forEach { trackHover(it, listener) }
+            expand?.let { add(it, BorderLayout.WEST) }
+            add(actions, BorderLayout.EAST)
+        }, BorderLayout.SOUTH)
     }
 
     override fun getMaximumSize(): Dimension = Dimension(Int.MAX_VALUE, preferredSize.height)

@@ -763,10 +763,8 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
         }
         val collapsed = isCollapsed(message)
         body.rows = if (collapsed) COLLAPSED_ROWS else expandedRows(message)
-        val footer = if (message.text.length > COLLAPSE_CHARS) {
-            PiPanelStyle.row(FlowLayout.LEFT, expandLink(index, message, collapsed))
-        } else null
-        return PiHistoryCard(body, time, PiPanelStyle.row(FlowLayout.RIGHT, rewind, fork, copy), footer)
+        val expand = if (message.text.length > COLLAPSE_CHARS) expandLink(index, message, collapsed) else null
+        return PiHistoryCard(body, time, PiPanelStyle.row(FlowLayout.RIGHT, rewind, fork, copy), expand)
     }
 
     /** Text-styled toggle: the card body itself stays a selectable text area. */
