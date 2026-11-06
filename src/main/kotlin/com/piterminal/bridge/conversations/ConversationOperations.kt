@@ -25,7 +25,7 @@ class ConversationOperations(private val project: Project, private val service: 
             return warn("Rewind needs a ready bridge and verified pi 1.5.0. Restart the Pi terminal after updating the extension.")
         }
         if (message.entryId == null || message.sessionId != snapshot.sessionId || c.piSessionId != snapshot.sessionId ||
-            snapshot.users().none { it.id == message.entryId }) return warn("This card has no unambiguous Pi entry binding. Refresh the session before rewinding.")
+            snapshot.users().none { it.id == message.entryId }) return warn("This card is not bound to a unique entry on the current Pi branch. It may predate this session or repeat another prompt, so it cannot be rewound.")
         val business = JsonObject().apply {
             addProperty("sessionId", c.piSessionId); addProperty("text", message.text)
             addProperty("draftRevision", c.draftRevision); addProperty("viewRevision", c.viewRevision)

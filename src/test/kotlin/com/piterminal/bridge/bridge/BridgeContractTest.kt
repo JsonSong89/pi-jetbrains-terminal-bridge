@@ -68,20 +68,41 @@ class BridgeContractTest {
         assertEquals(1, ambiguous.messages.size)
         assertNull(ambiguous.messages.single().entryId)
     }
+    @Test fun `one unmatchable legacy card does not unbalance the remaining bindings`() {
+        val c = conversation(PiUserMessage("stale", 1), PiUserMessage("one", 2), PiUserMessage("two", 3))
+        val result = ConversationProjection.apply(c, snapshot("one", "two"))
+        assertEquals("u0", c.messages.first { it.text == "one" }.entryId)
+        assertEquals("u1", c.messages.first { it.text == "two" }.entryId)
+        assertNull(c.messages.first { it.text == "stale" }.entryId)
+        assertTrue(result.ambiguous)
+    }
+    @Test fun `unresolved legacy card keeps its chronological slot`() {
+        val c = conversation(PiUserMessage("latest", 9, "session", "u1"))
+        c.messages.add(0, PiUserMessage("stale", 1))
+        assertTrue(ConversationProjection.apply(c, snapshot("old", "latest")).ambiguous)
+        assertEquals(listOf("old", "stale", "latest"), c.messages.map { it.text })
+        assertEquals(listOf("u0", null, "u1"), c.messages.map { it.entryId })
+    }
     @Test fun `confirmed anchors prevent mapping an older legacy card to a later prompt`() {
         val c = conversation(PiUserMessage("later", 1), PiUserMessage("anchor", 2, "session", "u0"))
         assertTrue(ConversationProjection.apply(c, snapshot("anchor", "later")).ambiguous)
         assertNull(c.messages.first { it.text == "later" }.entryId)
         assertEquals("u0", c.messages.first { it.text == "anchor" }.entryId)
     }
-    @Test fun `first legacy migration preserves removed cards while later TUI messages appear`() {
+    @Test fun `first legacy migration preserves removed cards older than the newest card`() {
+        val c = conversation(PiUserMessage("one", 2))
+        c.projectionInitialized = false
+        ConversationProjection.apply(c, snapshot("old removed card", "one"))
+        assertEquals(listOf("one"), c.messages.map { it.text })
+        assertTrue("session:u0" in c.hiddenEntries)
+        ConversationProjection.apply(c, snapshot("old removed card", "one", "new TUI prompt"))
+        assertEquals(listOf("one", "new TUI prompt"), c.messages.map { it.text })
+    }
+    @Test fun `first legacy migration keeps native prompts newer than the newest card`() {
         val c = conversation(PiUserMessage("one", 1))
         c.projectionInitialized = false
-        ConversationProjection.apply(c, snapshot("one", "old removed card"))
-        assertEquals(listOf("one"), c.messages.map { it.text })
-        assertTrue("session:u1" in c.hiddenEntries)
-        ConversationProjection.apply(c, snapshot("one", "old removed card", "new TUI prompt"))
-        assertEquals(listOf("one", "new TUI prompt"), c.messages.map { it.text })
+        ConversationProjection.apply(c, snapshot("one", "latest TUI prompt"))
+        assertEquals(listOf("u0", "u1"), c.messages.map { it.entryId })
     }
 
     @Test fun `hidden native and legacy cards do not resurrect on refresh`() {
