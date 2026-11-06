@@ -29,11 +29,14 @@ pi 侧 extension 源码是资源文件 `src/main/resources/bridge/pi-launcher-br
 由 `PiBridgeInstaller` 替换 `@EXTENSION_VERSION@` 后安装到
 `~/.pi/agent/extensions/pi-launcher-bridge.ts`（用户信任目录，只写自己那一个文件，勿动其他文件）。
 
-## 核心设计（详见 docs/tasks/）
+## 核心设计
+
+- **通信协议正式契约：`docs/bridge-protocol.md`（v2 双向操作通道：request/response/query/ack/event + operation journal + handoff ticket）**。`docs/tasks/` 与 `docs/plans/` 是实施记录与决策档案；改协议先改 `bridge-protocol.md`，再同步其他文档。
+- v1 短连接事件信封 `{v, seq, type, tabKey, token, data}`（seq 按 `(tabKey, type)` 分域去重、token 校验）只保留给 working/model/file 通知与旧 extension 的 session 绑定；v2 接管过的 tab 不再响应 v1 的换绑/停止事件。
+- 以下规则依然有效（详见 docs/tasks/）：
 
 - 会话 id 模型：conversation 有稳定 `id`（tabKey / 主键）+ `piSessionId`（当前绑定的 pi 会话，`/new` 等操作会换绑它；换绑时旧会话归档为 closed 条目，可复活）
 - 启动注入：`--session <jsonl 完整路径>`（resume，扫描命中时）/ `--session-id <uuid>`（新会话或扫描未命中，pi 对同 id 是 resume-if-exists）+ `--name`；**不注入 `--session-dir`**，落盘目录交给 pi 自身配置（`PI_CODING_AGENT_DIR`/`sessionDir`/默认 `--<cwd>--`），避免插件复刻 pi 目录约定；env 前缀注入 `PI_LAUNCHER_PORT/TOKEN/TAB_KEY`（Windows PowerShell 与 POSIX `env` 两种语法，按 OS 分支；Windows 推荐 pwsh 7；cmd.exe 跳过注入并警告；Extra arguments 里的 `--session`/`--resume` 等冲突旗标会丢掉并警告）
-- 通道协议：`{v, seq, type, tabKey, token, data}` 通用信封；主版本号 + 未知 type 丢弃 + seq 按 `(tabKey, type)` 分域去重；token 校验
 - 兜底：resume 判定收敛在 launch 时刻（jsonl 必已落盘；先扫默认项目目录，再跨 `sessions/` 子目录按 `*_<id>.jsonl` 搜，扫不到退回 `--session-id` 让 pi 自己解析）；不做启动期清空 / mtime 重绑（terminal 进程随 IDE 关闭终止，理由见设计文档 §七）
 - rename 禁止重名（含归档标题查重）；删除会话不删 pi 侧 jsonl
 

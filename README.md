@@ -46,7 +46,7 @@ IDEA (PiBridgeServer, loopback TCP + token)
 Terminal tab  ──  ~/.pi/agent/extensions/pi-launcher-bridge.ts (lazy-installed, content-compared)
 ```
 
-- The managed extension (VERSION **9**) runs in the same interactive TUI process. A v2 authenticated connection carries requests, results and full native active-branch snapshots; it never starts a second pi process or uses RPC mode.
+- The managed extension (VERSION **10**) runs in the same interactive TUI process. A v2 authenticated connection carries requests, results and full native active-branch snapshots; it never starts a second pi process or uses RPC mode.
 - Rewind and Fork require the verified API baseline **pi 1.5.0 / session v3**, a successful command-dispatch probe and advertised capabilities. Unsupported versions keep control actions disabled. The Fork migration still needs CI, real TUI and IDE acceptance.
 - Modification requests are saved and sent once. Disconnects and timeouts preserve the panel and query the original request id; reconnect never replays a modification. The toolbar offers **Sync current session** only when an unresolved operation has ended and can be reconciled.
 - Working/model/file notifications retain the v1 path. Fork and Rewind use v2 operations. Once v2 owns a tab, delayed v1 session events cannot rebind it. See the [protocol](docs/bridge-protocol.md) for developer contracts.

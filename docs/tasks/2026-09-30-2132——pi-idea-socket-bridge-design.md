@@ -112,7 +112,7 @@ pi-terminal-bridge/<project-hash>/
 ```
 
 - 日志不写 pi session tree，不持久化 bridge token。
-- 同目录临时文件 + 原子 rename + fsync；Unix 目录权限 0700、文件 0600，Windows 使用平台 ACL。
+- 同目录临时文件 + 原子 rename + fsync；Unix 目录权限 0700、文件 0600；Windows 依赖用户 profile 下 IDE system 目录自带的 ACL（token 不落盘，日志只含脱敏标识）。
 - writer lease 拒绝仍存活的进程接管；stale lease 回收串行化。损坏/不可证明安全时关闭修改能力。
 - 两端默认日志预算各 512 MiB；未决不淘汰。ack 后远端可去掉历史快照；本地成功提交后保留最近 checkpoint 与所有终态 tombstone。
 - 预算满时拒绝新操作，不通过清空日志自动解锁。损坏日志与失败的 stale-lease 回收可能需要人工检查。

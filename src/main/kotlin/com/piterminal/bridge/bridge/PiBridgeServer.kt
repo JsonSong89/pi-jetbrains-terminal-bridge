@@ -112,8 +112,9 @@ class PiBridgeServer(private val project: Project) : Disposable {
                 operations.connected(connection)
                 connection.run()
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
             // Malformed/authentication/EOF failures close only this client.
+            logger.debug("Pi bridge client closed: ${e.message}")
         }
     }
 
@@ -168,6 +169,11 @@ class PiBridgeServer(private val project: Project) : Disposable {
         if (service.get(tabKey) == null) return
         if (owns(tabKey) && type in setOf("session_changed", "session_stopped")) return
         when (type) {
+            // Once v2 owns the tab, snapshots are the single owner of working state;
+            // v1 agent_state stays notification telemetry only and must not race them.
+            "agent_state" if owns(tabKey) -> str(data, "state")?.let {
+                service.onBridgeAgentStateTelemetry(tabKey, it, str(data, "stopReason"))
+            }
             "session_changed" -> str(data, "sessionId")?.let {
                 service.onBridgeSessionChanged(tabKey, it, str(data, "extensionVersion"))
             }

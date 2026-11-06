@@ -46,6 +46,8 @@ class OperationStore(project: Project) {
         private val ID = Regex("[a-zA-Z0-9-]{1,128}")
         fun atomicWrite(path: Path, text: String) {
             Files.createDirectories(path.parent)
+            // POSIX gets 0700/0600; the Windows IDE system directory already sits
+            // under the user's profile ACL, and the loopback token never touches disk.
             runCatching { Files.setPosixFilePermissions(path.parent, PosixFilePermissions.fromString("rwx------")) }
             val tmp = Files.createTempFile(path.parent, ".operation-", ".tmp")
             try {

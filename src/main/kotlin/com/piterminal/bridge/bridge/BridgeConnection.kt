@@ -1,6 +1,7 @@
 package com.piterminal.bridge.bridge
 
 import com.google.gson.JsonObject
+import com.intellij.openapi.diagnostic.Logger
 import java.net.Socket
 import java.util.UUID
 import java.util.concurrent.ArrayBlockingQueue
@@ -23,6 +24,7 @@ class BridgeConnection(
     private val stopped = AtomicBoolean()
     @Volatile private var lastRead = System.nanoTime()
     val alive: Boolean get() = !stopped.get()
+    private val logger = Logger.getInstance(BridgeConnection::class.java)
     fun supports(method: String): Boolean = runCatching {
         hello.getAsJsonObject("capabilities").getAsJsonArray(method).any { it.asInt == 1 }
     }.getOrDefault(false)
@@ -67,7 +69,14 @@ class BridgeConnection(
             socket.soTimeout = 15_000
             val input = socket.getInputStream().buffered()
             while (alive) {
-                val frame = BridgeProtocol.readFrame(input) ?: break
+                val frame = try {
+                    BridgeProtocol.readFrame(input)
+                } catch (e: Exception) {
+                    // Oversized/corrupt/incomplete frames must be visible: the peer
+                    // never learns its frame was dropped from a silent reconnect loop.
+                    logger.warn("Pi bridge: closing $tabKey after unreadable frame: ${e.message}")
+                    break
+                } ?: break
                 lastRead = System.nanoTime()
                 require(frame.get("v")?.asInt == 2)
                 when (BridgeProtocol.string(frame, "type")) {

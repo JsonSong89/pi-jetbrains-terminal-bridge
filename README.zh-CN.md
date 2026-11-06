@@ -46,7 +46,7 @@ IDEA（PiBridgeServer，loopback TCP + token）
 Terminal 标签页 ── ~/.pi/agent/extensions/pi-launcher-bridge.ts（懒安装，按完整内容比对更新）
 ```
 
-- 托管 extension（VERSION **9**）仍运行在同一个交互式 TUI 进程里；v2 认证长连接传输请求、结果和完整原生活跃分支快照，不使用 RPC mode 或另起 pi 进程。
+- 托管 extension（VERSION **10**）仍运行在同一个交互式 TUI 进程里；v2 认证长连接传输请求、结果和完整原生活跃分支快照，不使用 RPC mode 或另起 pi 进程。
 - Rewind / Fork 的 API 基线锁定 **pi 1.5.0 / session v3**，还需通过内部命令 probe 并声明 capability；不支持的版本关闭控制操作。本轮 Fork 迁移仍待 CI、真实 TUI 和 IDE 集成验收。
 - 修改请求先落盘、只发送一次。断联和超时保留面板原状，只查询原 requestId；重连不重放修改。未决操作确认结束且可对账时，顶部才显示 **Sync current session** 图标。
 - working/model/写文件通知暂时保留 v1；Fork / Rewind 都经 v2 操作。v2 接管过的 tab 不会再被迟到的 v1 会话事件换绑。开发契约见[通信协议](docs/bridge-protocol.md)。

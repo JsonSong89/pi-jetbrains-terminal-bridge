@@ -266,6 +266,8 @@ class PiAdapter {
     pi.on("input", (event, ctx) => {
       const text = String(event.text).trimStart();
       if (text.startsWith("/pi-bridge-internal-")) return { action: "handled" };
+      // v1-era slash commands: keep consuming them so old habits never reach the
+      // model prompt. Candidate for removal after the first v2 release ships.
       if (/^\/bridge-(?:rewind|fork)(?:\s|$)/.test(text)) {
         ctx?.ui?.notify?.("Legacy control commands are disabled; update Pi Terminal Bridge and restart the terminal", "warning");
         return { action: "handled" };
@@ -485,7 +487,15 @@ class OperationRuntime {
   }
   async snapshotContext(record) {
     const current = await this.adapter.dispatch(ctx => this.adapter.capture(ctx)).catch(() => undefined);
-    return { ...record.response?.context, currentSnapshot: current };
+    const context = { ...record.response?.context, currentSnapshot: current };
+    // The durable journal keeps the execution evidence; the wire may only carry
+    // what fits the frame budget, so the IDE sees an explicit failure instead of
+    // an operation stuck in awaiting.
+    if (Buffer.byteLength(JSON.stringify(frame("response", { id: record.id, context }))) > MAX_FRAME) {
+      return { ...context, currentSnapshot: undefined,
+        contextError: { code: "CONTEXT_TOO_LARGE", message: "Snapshot evidence exceeds the frame budget" } };
+    }
+    return context;
   }
   async query(id) {
     const record = this.records.get(id) ?? await this.journal.read(id);
@@ -581,6 +591,12 @@ class OperationRuntime {
       }
       response = this.response(record.request, { status: result.status, effect: result.effect, data: result.data,
         error: result.error, context: { afterSnapshot: result.after } });
+      if (Buffer.byteLength(JSON.stringify(response)) > MAX_FRAME && result.after) {
+        // An oversized afterSnapshot must not leave the IDE awaiting forever:
+        // surface the budget failure as the terminal, execution evidence is kept in the journal.
+        response = this.response(record.request, { status: "failed", effect: result.effect === "applied" ? "applied" : "unknown",
+          error: { code: "CONTEXT_TOO_LARGE", message: "Post-operation snapshot exceeds the frame budget" } });
+      }
     } catch (e) {
       if (record.handoff) return; // Old runtime relinquished its right to write the outcome.
       response = this.response(record.request, { status: "failed", effect: effectStarted ? "unknown" : (e.effect ?? "none"),
@@ -608,7 +624,9 @@ class OperationRuntime {
 let seq = Date.now() * 1000;
 let sessionId;
 let lastRunStopReason;
-// v1 remains only for notifications and file refresh.
+// v1 remains for two reasons: agent/model/file notifications even under v2, and
+// session_changed/stopped for old extensions talking to a new IDE (a tab without a
+// v2 hello is unmanaged, so the legacy binding path must stay alive).
 function send(type, data) {
   if (!enabled()) return;
   const payload = JSON.stringify({ v: 1, seq: seq++, type, tabKey: TAB_KEY, token: TOKEN, data }) + "\n";

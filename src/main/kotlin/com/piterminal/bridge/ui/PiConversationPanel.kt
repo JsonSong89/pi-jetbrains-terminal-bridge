@@ -122,7 +122,6 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
     private var programmaticScroll = false
     private var remeasurePending = false
     private var syncing = false
-    private var comboDeleteClickInstalled = false
     private var suppressComboAction = false
     private var comboDeleteHoverIndex = -1
     private var reopenComboPopup = false
@@ -979,10 +978,7 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
     private fun installComboDeleteClickHandler() {
         val popup = combo.ui.getAccessibleChild(combo, 0) as? ComboPopup ?: return
         val list = popup.list
-        if (list.getClientProperty("pi-combo-delete") == true) {
-            comboDeleteClickInstalled = true
-            return
-        }
+        if (list.getClientProperty("pi-combo-delete") == true) return
         list.putClientProperty("pi-combo-delete", true)
         list.addMouseListener(object : MouseAdapter() {
             override fun mousePressed(e: MouseEvent) {
@@ -1022,7 +1018,6 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
                 }
             }
         })
-        comboDeleteClickInstalled = true
     }
 
     /**

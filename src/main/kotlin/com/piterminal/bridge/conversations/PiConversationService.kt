@@ -99,8 +99,9 @@ class PiConversationService(private val project: Project) {
     private val listeners = CopyOnWriteArrayList<Listener>()
     @Volatile
     private var activeId: String? = null
-    /** Agent working state per conversation id (bridge agent_state). */
+    /** Working badges. Owner: v2 snapshots once the bridge owns the tab; v1 agent_state before that. */
     private val workingIds = mutableSetOf<String>()
+    /** Edge detection for the agent-finish notification (v1 agent_state telemetry). */
     private val telemetryWorkingIds = mutableSetOf<String>()
     /** Tabs whose pi session id was confirmed by the bridge at least once. */
     private val boundTabs = mutableSetOf<String>()
@@ -472,6 +473,15 @@ class PiConversationService(private val project: Project) {
     }
 
     fun onBridgeAgentState(tabKey: String, state: String, stopReason: String? = null) {
+        val working = state == "working"
+        synchronized(workingIds) { if (working) workingIds.add(tabKey) else workingIds.remove(tabKey) }
+        notifyListeners(ChangeEvent(ChangeKind.STATE, tabKey))
+        PiStatusWidget.update(project)
+        onBridgeAgentStateTelemetry(tabKey, state, stopReason)
+    }
+
+    /** Agent-finish notification telemetry only; never touches the working badge. */
+    fun onBridgeAgentStateTelemetry(tabKey: String, state: String, stopReason: String? = null) {
         val conversation = get(tabKey) ?: return
         val working = state == "working"
         val becameIdle = synchronized(telemetryWorkingIds) {
@@ -479,9 +489,6 @@ class PiConversationService(private val project: Project) {
             if (working) telemetryWorkingIds.add(tabKey) else telemetryWorkingIds.remove(tabKey)
             wasWorking && !working
         }
-        synchronized(workingIds) { if (working) workingIds.add(tabKey) else workingIds.remove(tabKey) }
-        notifyListeners(ChangeEvent(ChangeKind.STATE, tabKey))
-        PiStatusWidget.update(project)
         if (becameIdle && PiSettings.getInstance().state.notifyOnAgentEnd && !PiBridgeUi.isIdeActive(project)) {
             val detail = when (stopReason) {
                 "error" -> " (stopped with an error)"
