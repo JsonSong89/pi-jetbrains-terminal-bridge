@@ -10,7 +10,8 @@ import com.intellij.openapi.project.Project
 /**
  * Persistent index of conversations (project level). Pi's own session jsonl
  * files remain the authoritative store of conversation data; this only keeps
- * the plugin-side index (id, title, piSessionId, draft, user message log).
+ * the plugin-side index, draft and an offline cache of native user messages.
+ * Obsolete hidden/pending XML fields are ignored; they never filter Pi history.
  */
 @Service(Service.Level.PROJECT)
 @State(
@@ -29,11 +30,8 @@ class PiConversationStore(private val project: Project) : PersistentStateCompone
         var messages: MutableList<Msg> = mutableListOf()
         var draftRevision: Long = 0
         var viewRevision: Long = 0
-        var hiddenEntries: MutableList<String> = mutableListOf()
-        var hiddenLegacy: MutableList<Msg> = mutableListOf()
         var recoveryText: String = ""
         var appliedOperations: MutableList<String> = mutableListOf()
-        var projectionInitialized: Boolean = false
     }
 
     class Msg {
@@ -41,7 +39,6 @@ class PiConversationStore(private val project: Project) : PersistentStateCompone
         var timestamp: Long = 0
         var sessionId: String? = null
         var entryId: String? = null
-        var pending: Boolean = false
     }
 
     class State {
@@ -75,12 +72,9 @@ class PiConversationStore(private val project: Project) : PersistentStateCompone
             piSessionId = e.piSessionId,
             createdAt = e.createdAt,
             draft = e.draft,
-            messages = e.messages.map { PiUserMessage(it.text, it.timestamp, it.sessionId, it.entryId, it.pending) },
+            messages = e.messages.map { PiUserMessage(it.text, it.timestamp, it.sessionId, it.entryId) },
             draftRevision = e.draftRevision, viewRevision = e.viewRevision,
-            hiddenEntries = e.hiddenEntries.toSet(),
-            hiddenLegacy = e.hiddenLegacy.map { PiUserMessage(it.text, it.timestamp, it.sessionId, it.entryId) },
-            recoveryText = e.recoveryText, appliedOperations = e.appliedOperations.toSet(),
-            projectionInitialized = e.projectionInitialized
+            recoveryText = e.recoveryText, appliedOperations = e.appliedOperations.toSet()
         )
     }
 
@@ -101,11 +95,8 @@ class PiConversationStore(private val project: Project) : PersistentStateCompone
                 draft = c.draft
                 draftRevision = c.draftRevision
                 viewRevision = c.viewRevision
-                hiddenEntries = c.hiddenEntries.toMutableList()
-                hiddenLegacy = c.hiddenLegacy.map { message(it) }.toMutableList()
                 recoveryText = c.recoveryText
                 appliedOperations = c.appliedOperations.toMutableList()
-                projectionInitialized = c.projectionInitialized
                 messages = c.messages.map { message(it) }.toMutableList()
             }
         }.toMutableList()
@@ -113,7 +104,7 @@ class PiConversationStore(private val project: Project) : PersistentStateCompone
     }
 
     private fun message(m: PiUserMessage): Msg = Msg().apply {
-        text = m.text; timestamp = m.timestamp; sessionId = m.sessionId; entryId = m.entryId; pending = m.pending
+        text = m.text; timestamp = m.timestamp; sessionId = m.sessionId; entryId = m.entryId
     }
 
     data class StoredConversation(
@@ -126,11 +117,8 @@ class PiConversationStore(private val project: Project) : PersistentStateCompone
         val messages: List<PiUserMessage>,
         val draftRevision: Long,
         val viewRevision: Long,
-        val hiddenEntries: Set<String>,
-        val hiddenLegacy: List<PiUserMessage>,
         val recoveryText: String,
-        val appliedOperations: Set<String>,
-        val projectionInitialized: Boolean
+        val appliedOperations: Set<String>
     )
 
     companion object {

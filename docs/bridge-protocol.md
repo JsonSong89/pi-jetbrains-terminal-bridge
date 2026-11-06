@@ -11,7 +11,7 @@
 - IDEA 启动并保留交互式 pi TUI；extension 在同一 pi 进程中运行。**不用 pi RPC mode，不启动第二个 RPC 进程操作同一 session。**
 - 仅借鉴 pi RPC 的 JSONL、请求 id、response/event 分离；本文是 bridge 协议，不声称与 pi RPC wire-compatible。
 - pi 是会话、分支和运行状态的权威来源。执行必须复用公开 pi API；禁止直接改 JSONL、私有 runner 或自行实现 SessionManager。
-- IDEA 是本地草稿、面板隐藏记录、标题和 UI 状态的权威来源。收到快照不能覆盖这些本地数据。
+- IDEA 是本地草稿、标题和 UI 状态的权威来源；消息列表只是 pi 分支的展示缓存，不能作为第二份历史。完整有效快照整体替换缓存，旧隐藏记录不再过滤原生历史。
 - bridge 负责可靠表达“请求、已知结果和未知”，不承诺两进程原子提交或跨崩溃 exactly-once。
 
 ## 2. 传输与握手
@@ -136,7 +136,10 @@ source
 - context 默认完整活跃分支；无需在每个 heartbeat 重传。完整不意味着包含密钥、环境变量、UI 对象或不可序列化 ctx。
 - 查询历史结果时 afterSnapshot 表示执行后的证据，currentSnapshot 是新观察；若历史快照未保留，明确缺失，不能用当前快照冒充。
 - 大快照无需每次耐久保存多份。操作日志可保存足以核验的终态与分支证据；恢复时取当前快照。没有足够历史证据则不自动提交旧业务结果。
-- IDEA 保留本地草稿与隐藏卡片；采用用户消息投影显示，不要求展示传输中的 AI/tool entries。歧义旧记录不可猜测绑定。
+- 历史卡片必须由 pi 的完整、稳定的当前活跃分支快照直接生成，每张卡携带原生 `(sessionId, entryId)`；禁止按文本、时间戳、顺序或 slash 命令展开结果推断身份。extension 使用公开 `ctx.sessionManager.getBranch()/getSessionId()/getSessionFile()/getLeafId()`，经现有 `session.snapshot/1` 和快照事件提供数据；IDEA 不实现 jsonl 会话树解析，也不新增 WS 服务。保留分支顺序，不按时间戳重排；重复文本仍是不同 entry。
+- IDEA 只展示用户消息，不要求展示传输中的 AI/tool entries。发送输入不立即添加历史卡片；`/model` 等未生成原生用户消息的输入不进入历史，skill/模板显示 pi 实际保存的文本。
+- 升级后第一份有效快照整体替换旧卡片，包括旧 pending 和父 session 遗留项；取消旧隐藏策略，因此当前分支上的旧隐藏消息也会显示。无效、不完整或其他 session 的快照不能清空缓存。
+- 断联/未启动时本地记录只作离线缓存，不可用来推断操作目标；重连后刷新。操作 checkpoint 不得覆盖新快照的历史，只恢复草稿、恢复文本和幂等信息。未决操作期间继续冻结视图，保持既有结果确认流程；解锁后采用当前原生分支。
 
 建议完整快照发送节点：握手完成、重连、操作终态、session 变化、显式 `session.snapshot`。高频流事件先合并；第一版不设计增量一致性算法。
 
@@ -205,7 +208,7 @@ v2 接管 tab 的 session 绑定与快照后，旧 v1 session_changed/stopped �
 2. 注册 schema、稳定资源锁、前置/后置核验。
 3. 通过 PiAdapter 复用公开 API；不重实现会话管理。
 4. 返回统一 response/context；无需新增消息族。
-5. 实现 IDEA 业务提交器，保护草稿、隐藏记录和本地 revision。
+5. 实现 IDEA 业务提交器，保护草稿和本地 revision；历史只投影原生分支。
 6. 添加能力声明、真实 API smoke test 和故障契约测试。
 
 新增 replacement 方法复用 handoff；多阶段流程（如新 Terminal fork）放业务 Workflow。若新增方法要求改 Transport/公共执行状态，先审查抽象边界，不直接添加特例。

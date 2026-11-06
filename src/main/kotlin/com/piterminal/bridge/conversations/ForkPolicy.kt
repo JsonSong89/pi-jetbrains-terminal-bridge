@@ -42,8 +42,6 @@ object ForkPolicy {
     fun rebind(c: PiConversation, sessionId: String) {
         val previous = c.piSessionId
         c.messages.replaceAll { if (it.sessionId == previous) it.copy(sessionId = sessionId) else it }
-        val hidden = c.hiddenEntries.map { if (it.startsWith("$previous:")) "$sessionId:${it.removePrefix("$previous:")}" else it }
-        c.hiddenEntries.clear(); c.hiddenEntries.addAll(hidden)
         c.piSessionId = sessionId
     }
 

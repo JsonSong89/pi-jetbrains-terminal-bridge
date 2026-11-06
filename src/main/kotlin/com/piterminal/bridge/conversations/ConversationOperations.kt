@@ -13,7 +13,6 @@ import com.piterminal.bridge.bridge.SessionSnapshot
 class ConversationOperations(private val project: Project, private val service: PiConversationService) {
     private val bridge get() = BridgeOperations.getInstance(project)
     private val committing = mutableSetOf<String>()
-    private val warnedMigration = mutableSetOf<String>()
     private val restored = mutableSetOf<String>()
 
     fun rewind(tab: String, index: Int): Boolean {
@@ -24,9 +23,8 @@ class ConversationOperations(private val project: Project, private val service: 
         if (PiBridgeServer.getInstance(project).connection(tab)?.supports("conversation.rewind") != true || snapshot?.usable != true) {
             return warn("Rewind needs a ready bridge and verified pi 1.5.0. Restart the Pi terminal after updating the extension.")
         }
-        if (message.pending) return warn("Pi has not recorded this prompt as a user message (for example a /command, or input sent before Pi was ready), so it cannot be rewound.")
         if (message.entryId == null || message.sessionId != snapshot.sessionId || c.piSessionId != snapshot.sessionId ||
-            snapshot.users().none { it.id == message.entryId }) return warn("This card is not bound to a unique entry on the current Pi branch. It may predate this session or repeat another prompt, so it cannot be rewound.")
+            snapshot.users().none { it.id == message.entryId }) return warn("This cached message is not on the current Pi branch. Wait for session synchronization before rewinding.")
         val business = JsonObject().apply {
             addProperty("sessionId", c.piSessionId); addProperty("text", message.text)
             addProperty("draftRevision", c.draftRevision); addProperty("viewRevision", c.viewRevision)
@@ -37,12 +35,8 @@ class ConversationOperations(private val project: Project, private val service: 
         return id.id.isNotEmpty()
     }
 
-    /** Full snapshots project user entries while preserving local hidden/ambiguous cards. */
-    fun project(c: PiConversation, snapshot: SessionSnapshot): Boolean {
-        val result = ConversationProjection.apply(c, snapshot)
-        if (result.ambiguous && warnedMigration.add(c.id)) warn("Some old message cards could not be bound uniquely. They were preserved; rewind is disabled for those cards.")
-        return result.changed
-    }
+    /** Replace the display cache with native user entries; never infer entry identities. */
+    fun project(c: PiConversation, snapshot: SessionSnapshot): Boolean = ConversationProjection.apply(c, snapshot)
 
     fun receive(record: JsonObject) {
         val tab = BridgeProtocol.string(record, "tabKey") ?: return
@@ -60,8 +54,13 @@ class ConversationOperations(private val project: Project, private val service: 
                 restoreCheckpoint(c, checkpoint, id)
             }
         }
-        if (local in setOf("applied", "reconciled")) {
-            committing.remove(id); service.operationChanged(tab); return
+        if (local in setOf("applied", "reconciled", "rejected")) {
+            committing.remove(id)
+            // A snapshot may have arrived while this operation still held the lock.
+            // Once all locks are released, display the latest native branch.
+            if (!bridge.locked(tab)) bridge.snapshot(tab)?.let { service.onBridgeSnapshot(tab, it) }
+            service.operationChanged(tab)
+            return
         }
         if (local == "not_sent") {
             if (committing.add(id)) warn("Operation was not sent. The panel and draft were preserved.")
@@ -69,7 +68,7 @@ class ConversationOperations(private val project: Project, private val service: 
             bridge.snapshot(tab)?.let { service.onBridgeSnapshot(tab, it) }
             return
         }
-        if (local in setOf("conflict", "rejected") || id in committing) { service.operationChanged(tab); return }
+        if (local == "conflict" || id in committing) { service.operationChanged(tab); return }
         if (id in c.appliedOperations) { bridge.commit(id, "applied", checkpoint(c)); return }
         val response = record.getAsJsonObject("response") ?: run { service.operationChanged(tab); return }
         if (!BridgeProtocol.terminal(response)) { service.operationChanged(tab); return }
@@ -210,11 +209,8 @@ class ConversationOperations(private val project: Project, private val service: 
     private fun restoreCheckpoint(c: PiConversation, value: JsonObject, id: String) {
         if (id in c.appliedOperations || BridgeProtocol.string(value, "piSessionId") != c.piSessionId) return
         val saved = BridgeProtocol.gson.fromJson(value, PiConversation::class.java)
-        if (saved.viewRevision >= c.viewRevision) {
-            c.messages.clear(); c.messages.addAll(saved.messages); c.viewRevision = saved.viewRevision
-            c.projectionInitialized = saved.projectionInitialized
-            c.hiddenEntries.addAll(saved.hiddenEntries); c.hiddenLegacy.clear(); c.hiddenLegacy.addAll(saved.hiddenLegacy)
-        }
+        // Historical checkpoints are operation evidence, not current session history.
+        // Only a fresh native snapshot may replace the display cache.
         if (saved.draftRevision >= c.draftRevision) {
             c.draft = saved.draft; c.draftRevision = saved.draftRevision
             c.recoveryText = saved.recoveryText

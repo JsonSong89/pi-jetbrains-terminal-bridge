@@ -17,11 +17,8 @@ class PiConversation(
     var draft: String = "",
     var draftRevision: Long = 0,
     var viewRevision: Long = 0,
-    val hiddenEntries: MutableSet<String> = mutableSetOf(),
-    val hiddenLegacy: MutableList<PiUserMessage> = mutableListOf(),
     var recoveryText: String = "",
-    val appliedOperations: MutableSet<String> = mutableSetOf(),
-    var projectionInitialized: Boolean = false
+    val appliedOperations: MutableSet<String> = mutableSetOf()
 ) {
     override fun equals(other: Any?): Boolean = other is PiConversation && other.id == id
     override fun hashCode(): Int = id.hashCode()
@@ -32,7 +29,5 @@ data class PiUserMessage(
     val text: String,
     val timestamp: Long = System.currentTimeMillis(),
     val sessionId: String? = null,
-    val entryId: String? = null,
-    /** Sent from the panel, not yet matched to a native user entry. Never treated as legacy. */
-    val pending: Boolean = false
+    val entryId: String? = null
 )
