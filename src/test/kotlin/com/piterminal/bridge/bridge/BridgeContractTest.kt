@@ -153,6 +153,47 @@ class BridgeContractTest {
         assertEquals(SessionSnapshot.BranchCounts(1, 0), snapshot("one").counts())
     }
 
+    private fun timed(vararg prompts: Pair<String, Long>, extra: List<Map<String, Any?>> = emptyList()): SessionSnapshot {
+        val entries = prompts.mapIndexed { i, (text, ts) -> mapOf<String, Any?>("id" to "u$i", "type" to "message",
+            "message" to mapOf("role" to "user", "content" to text, "timestamp" to ts)) } + extra
+        val chained = entries.mapIndexed { i, e -> e + ("parentId" to entries.getOrNull(i - 1)?.get("id")) }
+        return SessionSnapshot(BridgeProtocol.gson.toJsonTree(mapOf(
+            "snapshotId" to "snapshot", "capturedAt" to "diagnostic", "complete" to true, "consistency" to "stable",
+            "session" to mapOf("id" to "session"), "branch" to mapOf("leafId" to chained.lastOrNull()?.get("id"), "entries" to chained),
+            "state" to mapOf("idle" to true), "source" to mapOf("runtimeId" to "runtime", "piVersion" to "1.5.0")
+        )).asJsonObject)
+    }
+    @Test fun `bash execution messages without content keep the snapshot usable`() {
+        val bash = mapOf<String, Any?>("id" to "bash", "type" to "message", "message" to mapOf("role" to "bashExecution",
+            "command" to "ls", "output" to "", "exitCode" to 0, "cancelled" to false, "truncated" to false, "timestamp" to 2))
+        assertTrue(timed("one" to 1L, extra = listOf(bash)).usable)
+        val broken = mapOf<String, Any?>("id" to "a", "type" to "message", "message" to mapOf("role" to "assistant"))
+        assertFalse(timed("one" to 1L, extra = listOf(broken)).usable)
+    }
+    @Test fun `a pending command card without a native entry does not block later panel cards`() {
+        val c = conversation(PiUserMessage("/model x", 10_000, pending = true), PiUserMessage("second", 90_000, pending = true))
+        val result = ConversationProjection.apply(c, timed("second" to 90_100L, "from tui" to 95_000L))
+        assertFalse(result.ambiguous)
+        assertEquals(listOf("/model x", "second", "from tui"), c.messages.map { it.text })
+        assertEquals(listOf(null, "u0", "u1"), c.messages.map { it.entryId })
+        assertEquals(listOf(true, false, false), c.messages.map { it.pending })
+    }
+    @Test fun `pending cards match pi-normalized text and expanded commands once`() {
+        val c = conversation(PiUserMessage(ConversationProjection.normalize("a\tb\r\nc\u0007"), 1_000, pending = true),
+            PiUserMessage("/skill:review x", 5_000, pending = true))
+        assertEquals("a    b\nc", c.messages[0].text)
+        assertFalse(ConversationProjection.apply(c, timed("a    b\nc" to 1_050L, "<skill name=\"review\">body</skill>\n\nx" to 5_100L)).ambiguous)
+        assertEquals(listOf("u0", "u1"), c.messages.map { it.entryId })
+        assertEquals(2, c.messages.size)
+    }
+    @Test fun `pending cards never bind to prompts sent before them`() {
+        val c = conversation(PiUserMessage("repeat", 1, "session", "u0"), PiUserMessage("repeat", 60_000, pending = true))
+        assertFalse(ConversationProjection.apply(c, timed("repeat" to 1L)).ambiguous)
+        assertEquals(listOf("u0", null), c.messages.map { it.entryId })
+        ConversationProjection.apply(c, timed("repeat" to 1L, "repeat" to 60_200L))
+        assertEquals(listOf("u0", "u1"), c.messages.map { it.entryId })
+    }
+
     @Test fun `projection preserves draft and restores no off-branch bound messages`() {
         val old = PiUserMessage("one", 1, "session", "u0")
         val c = conversation(old, PiUserMessage("two", 2, "session", "u1"))

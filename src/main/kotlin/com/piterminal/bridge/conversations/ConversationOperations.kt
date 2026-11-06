@@ -24,6 +24,7 @@ class ConversationOperations(private val project: Project, private val service: 
         if (PiBridgeServer.getInstance(project).connection(tab)?.supports("conversation.rewind") != true || snapshot?.usable != true) {
             return warn("Rewind needs a ready bridge and verified pi 1.5.0. Restart the Pi terminal after updating the extension.")
         }
+        if (message.pending) return warn("Pi has not recorded this prompt as a user message (for example a /command, or input sent before Pi was ready), so it cannot be rewound.")
         if (message.entryId == null || message.sessionId != snapshot.sessionId || c.piSessionId != snapshot.sessionId ||
             snapshot.users().none { it.id == message.entryId }) return warn("This card is not bound to a unique entry on the current Pi branch. It may predate this session or repeat another prompt, so it cannot be rewound.")
         val business = JsonObject().apply {

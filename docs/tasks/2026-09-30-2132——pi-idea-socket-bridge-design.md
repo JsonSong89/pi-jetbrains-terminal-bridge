@@ -54,13 +54,13 @@ extension 在 `session_start` 之后派发唯一内部命令完成 probe，再�
 - 网络解析与日志在后台；IDE reader 等待后台消费，快照/UI 通知合并，避免 EDT 队列无限堆积。
 - 同时出现第二个活动 runtime 不直接接管；旧 socket 关闭后可重连。未知操作仍保留原请求身份与锁。
 
-v1 短连接事件暂保留，用于 working/idle、模型、写文件通知。按 `(tabKey,type)` 的 seq 去重；每个事件短暂失败时重试一次。v2 接管过的 tab，即使断联，旧 v1 `session_changed/stopped` 也不能抢先换绑或归档。
+v1 短连接事件暂保留，用于 working/idle、模型、写文件通知。按 `(tabKey,type)` 的 seq 去重；每个事件短暂失败时重试一次。状态类事件（`agent_state`、`model_changed`、`session_changed`、`session_stopped`）在 EDT 上只处理同类型最新一条；`file_modified` 每条对应不同路径，必须逐条处理，不能被后来的 seq 覆盖。v2 接管过的 tab，即使断联，旧 v1 `session_changed/stopped` 也不能抢先换绑或归档。
 
 v2 快照是该 tab 会话绑定与分支投影的单一入口。agent 完成通知另用 v1 状态转换记录，避免快照同步吞掉 error/abort 通知。
 
 ## 4. 快照和本地卡片
 
-`SessionSnapshot` 包含公开 session header/file/id、完整活跃分支的原生 entries、leaf、idle/model/pending 状态、采集时间及 source。采集前后对拍；snapshotId 覆盖 runtimeId、事件代数和完整原生内容，不只是 leaf。adapter 只缓存最多 16 个观察凭据。
+`SessionSnapshot` 包含公开 session header/file/id、完整活跃分支的原生 entries、leaf、idle/model/pending 状态、采集时间及 source。分支校验只要求 `user`/`assistant`/`toolResult` 角色带 `content`；其他角色（如 `!cmd` 写入的 `bashExecution`、`custom`、`branchSummary`、`compactionSummary`）没有 `content`，只校验 `role`。采集前后对拍；snapshotId 覆盖 runtimeId、事件代数和完整原生内容，不只是 leaf。adapter 只缓存最多 16 个观察凭据。
 
 完整稳定快照才可驱动历史更新；首连、重连、树变化、消息结束（合并）、模型变化、操作终态与主动查询都可同步。心跳不携带历史。
 
@@ -72,7 +72,9 @@ v2 快照是该 tab 会话绑定与分支投影的单一入口。agent 完成通
 
 历史卡片只提供 Rewind / Fork / Copy；删除入口与 deleteMessage 服务方法已移除。旧本地隐藏记录继续兼容，不恢复已隐藏卡片。旧卡片按文本和顺序的唯一映射绑定，已有 entry 身份作为顺序锚点；歧义保留并提示，不能按 newest-first 猜。无法匹配的旧卡片只跳过自身（例如 fork 前遗留的卡片），不得把后续卡片一起判为歧义；未绑定卡片按时间戳保留原位置，不堆到列表末尾。
 
-旧 XML 没有保存删除记录。首次 v2 迁移保留原面板可见性，把既未映射、又不属于歧义文本、且不晚于现有最新卡片的旧原生用户条目标为本地隐藏；因此迁移前仅在 TUI 输入的历史也可能保持不显示，仍可在 TUI 查看。比最新卡片更新的原生用户消息不可能是旧删除操作的结果，迁移时直接显示。初始化后的新原生用户消息正常进入投影。这是保护旧删除操作的保守取舍。
+面板发送的新卡片带 `pending` 标记，与旧卡片分开处理：不参与旧卡片的顺序映射、不保留文本、不触发迁移告警。卡片文本按 pi-tui 粘贴后提交的规则规范化（CRLF/CR→LF、制表符→4 空格、去除除换行外的控制字符、trim），与原生条目精确比较。绑定先按精确文本：取时间不早于卡片发送时间减 5s 的第一条未占用、未隐藏的原生用户条目。之后对仍未绑定的 `/` 开头卡片（skill、prompt 模板会被展开）做一次兜底：取发送后 60s 内、早于下一张待确认卡片的第一条未占用原生条目，显示改用原生文本。始终没有原生条目的卡片（如 `/model`、pi 未就绪时被退回编辑框的输入）保持本地卡片，不能 Rewind/Fork，之后出现同文本条目仍可绑定；不设超时删除。
+
+旧 XML 没有保存删除记录。首次 v2 迁移保留原面板可见性，把既未映射、又不属于歧义文本、且不晚于现有最新旧卡片（不含 `pending` 卡片）的旧原生用户条目标为本地隐藏；因此迁移前仅在 TUI 输入的历史也可能保持不显示，仍可在 TUI 查看。比最新卡片更新的原生用户消息不可能是旧删除操作的结果，迁移时直接显示。初始化后的新原生用户消息正常进入投影。这是保护旧删除操作的保守取舍。
 
 草稿、隐藏集合和本地幂等标记仍写入 project XML；操作的业务 checkpoint 与幂等标记还会一起原子写入独立日志，弥补平台 XML 延迟落盘窗口。恢复不覆盖 revision 更高的新草稿/视图。
 

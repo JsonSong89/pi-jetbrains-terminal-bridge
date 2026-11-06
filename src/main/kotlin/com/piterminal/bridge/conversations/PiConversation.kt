@@ -32,5 +32,7 @@ data class PiUserMessage(
     val text: String,
     val timestamp: Long = System.currentTimeMillis(),
     val sessionId: String? = null,
-    val entryId: String? = null
+    val entryId: String? = null,
+    /** Sent from the panel, not yet matched to a native user entry. Never treated as legacy. */
+    val pending: Boolean = false
 )

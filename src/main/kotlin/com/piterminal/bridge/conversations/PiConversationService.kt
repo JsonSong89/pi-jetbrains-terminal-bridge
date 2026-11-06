@@ -315,7 +315,7 @@ class PiConversationService(private val project: Project) {
         }
 
         terminal().sendText(conversation.id, text)
-        conversation.messages.add(PiUserMessage(text))
+        conversation.messages.add(PiUserMessage(ConversationProjection.normalize(text), pending = true))
         conversation.viewRevision++
         conversation.draft = ""
         conversation.draftRevision++

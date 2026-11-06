@@ -41,6 +41,7 @@ class PiConversationStore(private val project: Project) : PersistentStateCompone
         var timestamp: Long = 0
         var sessionId: String? = null
         var entryId: String? = null
+        var pending: Boolean = false
     }
 
     class State {
@@ -74,7 +75,7 @@ class PiConversationStore(private val project: Project) : PersistentStateCompone
             piSessionId = e.piSessionId,
             createdAt = e.createdAt,
             draft = e.draft,
-            messages = e.messages.map { PiUserMessage(it.text, it.timestamp, it.sessionId, it.entryId) },
+            messages = e.messages.map { PiUserMessage(it.text, it.timestamp, it.sessionId, it.entryId, it.pending) },
             draftRevision = e.draftRevision, viewRevision = e.viewRevision,
             hiddenEntries = e.hiddenEntries.toSet(),
             hiddenLegacy = e.hiddenLegacy.map { PiUserMessage(it.text, it.timestamp, it.sessionId, it.entryId) },
@@ -112,7 +113,7 @@ class PiConversationStore(private val project: Project) : PersistentStateCompone
     }
 
     private fun message(m: PiUserMessage): Msg = Msg().apply {
-        text = m.text; timestamp = m.timestamp; sessionId = m.sessionId; entryId = m.entryId
+        text = m.text; timestamp = m.timestamp; sessionId = m.sessionId; entryId = m.entryId; pending = m.pending
     }
 
     data class StoredConversation(

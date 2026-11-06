@@ -8,9 +8,10 @@ object ConversationProjection {
     fun apply(c: PiConversation, snapshot: SessionSnapshot): Result {
         if (!snapshot.usable || snapshot.sessionId != c.piSessionId) return Result(false, false)
         val users = snapshot.users()
-        // Confirmed bindings constrain both ends of the old ordered sequence.
-        val sequence = (c.messages + c.hiddenLegacy).filter { old -> old.entryId == null ||
-            (old.sessionId == snapshot.sessionId && users.any { it.id == old.entryId }) }.sortedBy { it.timestamp }
+        // Confirmed bindings constrain both ends of the old ordered sequence. Pending
+        // panel cards are matched separately below and never count as legacy.
+        val sequence = (c.messages + c.hiddenLegacy).filter { old -> !old.pending && (old.entryId == null ||
+            (old.sessionId == snapshot.sessionId && users.any { it.id == old.entryId })) }.sortedBy { it.timestamp }
         fun matches(old: PiUserMessage, native: SessionSnapshot.UserEntry): Boolean =
             if (old.entryId != null) old.entryId == native.id else old.text == native.text
         // One unmatched card (e.g. kept from before a fork) proves nothing about the
@@ -40,14 +41,16 @@ object ConversationProjection {
         c.messages.filter { it.entryId == null }.forEach { old -> bindings[old]?.let { native ->
             existing[native.id] = old.copy(sessionId = snapshot.sessionId, entryId = native.id)
         } }
+        bindPending(c, users, snapshot.sessionId, existing, bindings)
         val unresolved = c.messages.filter { it.entryId == null && !bindings.containsKey(it) }
-        val reservedTexts = (unresolved + c.hiddenLegacy).map { it.text }.toSet()
+        // Pending cards are not legacy uncertainty: they neither reserve text nor warn.
+        val reservedTexts = (unresolved.filter { !it.pending } + c.hiddenLegacy).map { it.text }.toSet()
         if (!c.projectionInitialized) {
             // Legacy XML never recorded deletions. Preserve its card visibility on the
             // first migration, but only up to the newest known card: a later native
             // prompt cannot be the result of an old deletion. A conversation without
             // cards adopts the whole branch instead of hiding it.
-            val cutoff = c.messages.maxOfOrNull { it.timestamp }
+            val cutoff = c.messages.filter { !it.pending }.maxOfOrNull { it.timestamp }
             if (cutoff != null) users.filter {
                 it.id !in existing && it.text !in reservedTexts && it.timestamp <= cutoff
             }.forEach { c.hiddenEntries.add(key(snapshot.sessionId, it.id)) }
@@ -64,7 +67,44 @@ object ConversationProjection {
         if (changed) {
             c.messages.clear(); c.messages.addAll(ordered); c.viewRevision++
         }
-        return Result(changed, unresolved.isNotEmpty() || c.hiddenLegacy.isNotEmpty())
+        return Result(changed, unresolved.any { !it.pending } || c.hiddenLegacy.isNotEmpty())
     }
+
+    /**
+     * Bind panel-sent cards to the native entries pi created for them. Exact text
+     * first (after pi-tui's paste normalization); then one fallback for `/` input
+     * that pi expands (skills, prompt templates). Cards that never produced an
+     * entry (`/model`, input bounced before pi was ready) stay local.
+     */
+    private fun bindPending(c: PiConversation, users: List<SessionSnapshot.UserEntry>, sessionId: String,
+                            existing: MutableMap<String?, PiUserMessage>,
+                            bindings: java.util.IdentityHashMap<PiUserMessage, SessionSnapshot.UserEntry>) {
+        val pending = c.messages.filter { it.pending && it.entryId == null }.sortedBy { it.timestamp }
+        if (pending.isEmpty()) return
+        val claimed = existing.keys.filterNotNull().toMutableSet()
+        users.forEach { if (key(sessionId, it.id) in c.hiddenEntries) claimed.add(it.id) }
+        fun bind(card: PiUserMessage, native: SessionSnapshot.UserEntry) {
+            claimed.add(native.id); bindings[card] = native
+            existing[native.id] = card.copy(sessionId = sessionId, entryId = native.id, pending = false)
+        }
+        for (card in pending) {
+            val text = normalize(card.text)
+            users.firstOrNull { it.id !in claimed && it.timestamp >= card.timestamp - SEND_SKEW_MS && normalize(it.text) == text }
+                ?.let { bind(card, it) }
+        }
+        pending.forEachIndexed { i, card ->
+            if (bindings.containsKey(card) || !card.text.startsWith("/")) return@forEachIndexed
+            val until = minOf(card.timestamp + EXPANSION_WINDOW_MS, pending.getOrNull(i + 1)?.timestamp ?: Long.MAX_VALUE)
+            users.firstOrNull { it.id !in claimed && it.timestamp >= card.timestamp - SEND_SKEW_MS && it.timestamp < until }
+                ?.let { bind(card, it) }
+        }
+    }
+
+    /** pi-tui paste + submit: CRLF/CR to LF, tabs to 4 spaces, drop control chars except LF, trim. */
+    fun normalize(text: String): String = text.replace("\r\n", "\n").replace('\r', '\n').replace("\t", "    ")
+        .filter { it == '\n' || it.code >= 32 }.trim()
+
+    private const val SEND_SKEW_MS = 5_000L
+    private const val EXPANSION_WINDOW_MS = 60_000L
     fun key(sessionId: String, entryId: String): String = "$sessionId:$entryId"
 }
