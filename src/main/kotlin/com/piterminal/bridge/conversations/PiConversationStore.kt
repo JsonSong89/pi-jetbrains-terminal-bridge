@@ -10,7 +10,8 @@ import com.intellij.openapi.project.Project
 /**
  * Persistent index of conversations (project level). Pi's own session jsonl
  * files remain the authoritative store of conversation data; this only keeps
- * the plugin-side index (id, title, piSessionId, draft, user message log).
+ * the plugin-side index, draft and an offline cache of native user messages.
+ * Obsolete hidden/pending XML fields are ignored; they never filter Pi history.
  */
 @Service(Service.Level.PROJECT)
 @State(
@@ -27,11 +28,17 @@ class PiConversationStore(private val project: Project) : PersistentStateCompone
         var createdAt: Long = 0
         var draft: String = ""
         var messages: MutableList<Msg> = mutableListOf()
+        var draftRevision: Long = 0
+        var viewRevision: Long = 0
+        var recoveryText: String = ""
+        var appliedOperations: MutableList<String> = mutableListOf()
     }
 
     class Msg {
         var text: String = ""
         var timestamp: Long = 0
+        var sessionId: String? = null
+        var entryId: String? = null
     }
 
     class State {
@@ -65,7 +72,9 @@ class PiConversationStore(private val project: Project) : PersistentStateCompone
             piSessionId = e.piSessionId,
             createdAt = e.createdAt,
             draft = e.draft,
-            messages = e.messages.map { PiUserMessage(it.text, it.timestamp) }
+            messages = e.messages.map { PiUserMessage(it.text, it.timestamp, it.sessionId, it.entryId) },
+            draftRevision = e.draftRevision, viewRevision = e.viewRevision,
+            recoveryText = e.recoveryText, appliedOperations = e.appliedOperations.toSet()
         )
     }
 
@@ -84,15 +93,18 @@ class PiConversationStore(private val project: Project) : PersistentStateCompone
                 piSessionId = c.piSessionId
                 createdAt = c.createdAt
                 draft = c.draft
-                messages = c.messages.map { m ->
-                    Msg().apply {
-                        text = m.text
-                        timestamp = m.timestamp
-                    }
-                }.toMutableList()
+                draftRevision = c.draftRevision
+                viewRevision = c.viewRevision
+                recoveryText = c.recoveryText
+                appliedOperations = c.appliedOperations.toMutableList()
+                messages = c.messages.map { message(it) }.toMutableList()
             }
         }.toMutableList()
         myState.activeId = activeId
+    }
+
+    private fun message(m: PiUserMessage): Msg = Msg().apply {
+        text = m.text; timestamp = m.timestamp; sessionId = m.sessionId; entryId = m.entryId
     }
 
     data class StoredConversation(
@@ -102,7 +114,11 @@ class PiConversationStore(private val project: Project) : PersistentStateCompone
         val piSessionId: String,
         val createdAt: Long,
         val draft: String,
-        val messages: List<PiUserMessage>
+        val messages: List<PiUserMessage>,
+        val draftRevision: Long,
+        val viewRevision: Long,
+        val recoveryText: String,
+        val appliedOperations: Set<String>
     )
 
     companion object {

@@ -7,6 +7,12 @@ on:
   pull_request:
     branches: [ main ]
   workflow_dispatch:
+    inputs:
+      tui_smoke:
+        description: 'Run the isolated real pi 1.5.0 TUI smoke test'
+        required: false
+        type: boolean
+        default: false
 
 # Pushing a commit to main and then tagging it fires two events.
 # Same SHA shares one slot; the tag run cancels the branch run.
@@ -69,8 +75,14 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Test bridge extension command handlers
+      - name: Test bridge extension contracts
         run: node --test tests/bridge-extension.test.mjs
+
+      - name: Smoke test real pi 1.5.0 TUI
+        if: github.event_name == 'workflow_dispatch' && inputs.tui_smoke
+        run: |
+          npm install --prefix "$RUNNER_TEMP/pi-bridge-smoke" @earendil-works/pi-coding-agent@1.5.0
+          PI_BINARY="$RUNNER_TEMP/pi-bridge-smoke/node_modules/.bin/pi" python3 tests/bridge-tui-smoke.py
 
       - name: Set up JDK 21
         uses: actions/setup-java@v5
@@ -85,7 +97,7 @@ jobs:
         run: chmod +x gradlew
 
       - name: Build plugin
-        run: ./gradlew buildPlugin
+        run: ./gradlew test buildPlugin
 
       - name: Upload plugin artifact
         uses: actions/upload-artifact@v6

@@ -28,6 +28,9 @@
 - **一键启动** —— 工具栏按钮在 Terminal 工具窗中打开专属 Pi 标签页，按配置的模型 / thinking 级别 / 额外参数运行 `pi`。
 - **发送到 Pi** —— 编辑器选中代码，右键 → *Send to Pi*，文件引用（`@path/file.go#L10-25`）直达 Pi 输入框。
 - **每条消息可 Fork / Rewind** —— 用户消息卡片自带两个动作，语义刻意不同：**Fork** 复制出新会话，保留到该消息（含该轮完整回复）为止，其后历史全部丢弃、输入框留空；**Rewind** 不换会话，把活跃分支退到该消息**之前**（pi `/tree` 语义——该消息及之后的对话退出模型上下文，消息文本回到输入框待改）。
+- **长历史可导航** —— 超过约 480 字的消息默认折叠为 4 行，带「展开」链接（超长消息展开封顶 200 行）；滚动条右侧一条细轨道按消息索引**等分**打点（一条巨长的消息不会把其余消息挤成几像素），点一下落到该消息头部；`Alt+↑` / `Alt+↓` 逐条上/下跳。
+- **历史就是 Pi 的分支** —— 卡片直接渲染自 Pi 当前原生活跃分支，保留原始 entry id 与分支顺序，不再按本地发送文本匹配；Pi 记录下该条目才出卡片，输入栏上方还有一个不抢眼的 `user/assistant+tool` 计数。
+- **滚动位置不再被打断** —— agent 状态变化不再把历史列表拽回底部；只有发送、或本来就在底部时才跟随末尾。
 - **Pi 写完立刻同步** —— 一收到 write/edit 工具结果就刷新对应文件，不用等 IDEA 大约 10 秒的磁盘轮询。也可选再打开该文件。
 - **通知（默认关闭，需在设置中开启）**
   - agent 结束时气泡通知（含出错 / 中止原因）——仅 IDE 在后台时弹出；点击可定位到对应终端
@@ -44,10 +47,10 @@ IDEA（PiBridgeServer，loopback TCP + token）
 Terminal 标签页 ── ~/.pi/agent/extensions/pi-launcher-bridge.ts（懒安装，按完整内容比对更新）
 ```
 
-- extension 在首次终端启动时安装，上报 `session_changed`、`agent_state`、`model_changed`、`file_modified`（取自 `tool_result`，文件实际写完之后）。
-- 插件在启动时注入 session id；运行期 `/new` 类换绑通过 `session_changed` 事件归档旧会话并绑定新会话。
-- 协议：`{v, seq, type, tabKey, token, data}` —— 每行一个 JSON 对象，按 `(tabKey, type)` 去重，未知 type 丢弃，版本不匹配显式告警。
-- 全链路尽力而为：桥接失效时会话功能不受影响，退化为手动恢复。
+- 托管 extension（VERSION **10**）仍运行在同一个交互式 TUI 进程里；v2 认证长连接传输请求、结果和完整原生活跃分支快照，不使用 RPC mode 或另起 pi 进程。
+- Rewind / Fork 的 API 基线锁定 **pi 1.5.0 / session v3**，并需声明 capability；不支持的版本关闭控制操作，启动、发送、历史与通知照常工作。
+- 修改请求先落盘、只发送一次。断联和超时保留面板原状，只查询原 requestId；重连不重放修改。未决操作确认结束且可对账时，顶部才显示 **Sync current session** 图标。
+- working/model/写文件通知暂时保留 v1；Fork / Rewind 都经 v2 操作。v2 接管过的 tab 不会再被迟到的 v1 会话事件换绑。开发契约见[通信协议](docs/bridge-protocol.md)。
 
 ## 使用方式
 
@@ -73,22 +76,35 @@ Pi 标签页是**真实终端里跑着完整的 pi TUI** —— 所有斜杠命�
 
 面板里每条用户消息卡片还带一个 **Fork** 按钮（分支图标）：新建会话 `<原会话>-fork`，
 保留**到该消息（含其回复）为止**的历史、其后全部丢弃，输入框留空，从这个点在新会话里
-继续追问，原会话不受影响。实现上插件先以 `--fork <session>` 拉起包含全量历史的新终端，首次 bridge bind 后只发送一次
-首次 bridge bind 后等待 TUI 启动，再只发送一次 `/bridge-fork`；之后 IDEA 每 1.5 秒只读检查
-绑定的 session id，最多 6 次。id 变化即确认 fork 成功，否则记录超时。检查不会重发命令，
-也不会反复写入 TUI 输入栏。
+继续追问，原会话不受影响。插件先以 CLI 创建独立的全量副本 Terminal，等待 bridge 能力和
+完整快照就绪，再按原生 entry 身份核对选中的完整 turn。随后仅提交一次 v2 分叉请求，
+通过公开 API 在该轮最后一个 entry 分叉，包含工具调用、工具结果和最终回复。
+新会话经耐久 handoff 确认完整分支后，面板才裁剪；中间副本不会归档成额外会话。
 
-**Rewind** 按钮（撤销图标，位于 Fork 左侧）是会话内变体：在同一 session 里调
-`navigateTree` —— 不新建会话、不重启终端 —— 裁剪点与 fork 不同：该消息**也一并移出**活跃分支、
-退出模型上下文，且该消息文本预填到面板输入框待改重发。树上的 entry 仍留在 jsonl 里，
-与 `/tree` 行为一致。首条消息没有 parent 时暂不支持回退，会显示警告。
+Fork 会拒绝忙碌会话、不在当前原生分支上的缓存消息、带 label 的会话，以及目标 TUI 输入框已有内容的情况。
+源 Terminal 和 IDEA 草稿保留。准备期间可点顶部 **Stop fork preparation** 图标停止并保留全量副本；请求提交后，
+断联只查询原操作 ID，不重复拉起 Terminal 或再次 fork。失败或未知时保留副本供检查。
 
-Fork 的截点是下一条用户消息之前的最后一个 entry，包含该轮全部工具调用、工具结果和最终回复，
-而不是第一条 assistant 消息。这与 pi 原生 `/fork` 默认“选中消息之前 + 回填编辑”的行为有意不同。
+**Rewind** 按钮（撤销图标，位于 Fork 左侧）经双向 bridge 在同一 session 内导航。
+面板保留原状，收到 pi 确认结果并核验完整分支快照后才更新；选中的用户消息及后续对话
+退出活跃分支，树上的 entry 仍保留在 jsonl。控制命令不再粘贴到 Terminal 编辑器。
 
-命令回归测试：`node --test tests/bridge-extension.test.mjs`（不需要 IDEA 或 Gradle 构建）。
-CI 会执行实际打包资源里的两个 handler。打 tag 前扩展 VERSION 保持 **6**，安装时按文件全内容
-比较更新；更新后的代码在新打开的 Pi 终端中生效。
+pi 忙碌、首条消息无 parent，或 parent 是另一条 user/custom message 时，会在执行前拒绝，
+避免多退或改变 TUI 编辑器。等待期间编辑 IDEA 草稿不会被覆盖，回退文本会保存在
+**Restore text** 入口，点击追加。输入栏左下角会用最新 v2 分支快照显示低调的
+`用户/AI+tool` 次数。状态自动同步；可恢复未决操作时，顶部才显示 **Sync current session**
+图标，它不会重做操作。**Restore text** 也改为按需出现的顶部图标，悬停可查看用途。
+输入框左下角的 Workspace 使用无边框小图标。未知期间可以查看、复制和编辑草稿，
+同一会话的冲突修改会被锁住。
+
+历史卡片直接来自 pi 当前原生分支，保留原生 session/entry id 和分支顺序；右下角常驻 Rewind、Fork、Copy。插件不再用本地发送文本匹配历史。发送后，只有 pi 实际记录了 user entry 才显示卡片；`/model` 不产生卡片，skill/模板显示 pi 保存的展开文本。
+
+第一份有效快照整体替换旧本地卡片，旧隐藏记录不再过滤历史，因此当前分支中以前隐藏的消息也会重新显示；草稿保留。未连接时保存的消息仅作离线缓存，Rewind/Fork 需要有效在线快照。session 解析和分支遍历由 pi 公开 SessionManager API 完成，经现有 bridge 提供给面板。
+
+验证入口：`node --test tests/bridge-extension.test.mjs`、Gradle `test`，以及显式运行的
+`PI_BINARY=/path/to/pi python3 tests/bridge-tui-smoke.py`（真实 pi 1.5.0 PTY smoke，覆盖 rewind 与 fork 的运行时替换）。
+CI 手动触发可勾选 `tui_smoke`；extension 单测与 Gradle 单测在每次构建自动运行。
+安装按资源全文比较更新，新 Terminal 或 pi `/reload` 后加载。
 
 一句话：IDE 面板负责结构（持久列表、运行徽标、归档、点击恢复），TUI 负责 pi 的完整交互能力，两者随意组合。
 
@@ -111,17 +127,20 @@ CI 会执行实际打包资源里的两个 handler。打 tag 前扩展 VERSION �
 - `Alt+Shift+3` —— 发送选中内容 / 文件到 Pi
 - `Ctrl+Alt+Shift+T` —— 焦点到 Pi 终端（仅在 prompt 输入框内生效，不会在编辑器里抢走 Refactor This）
 - `Ctrl+Alt+Shift+E` —— 焦点到 Pi prompt（仅在 Pi 终端内生效）
+- `Alt+↑` / `Alt+↓` —— 在历史区跳到上/下一条消息头部（仅历史区有焦点时生效）
 
 ## 构建
 
 ```bash
-node --test tests/bridge-extension.test.mjs   # bridge 扩展命令 handler（秒级，无需 Gradle）
+node --test tests/bridge-extension.test.mjs   # 打包资源和故障契约
+./gradlew test         # JVM 协议/投影/提交契约
+PI_BINARY=/path/to/pi python3 tests/bridge-tui-smoke.py  # 显式执行真实 pi 1.5.0 PTY smoke
 ./gradlew build        # 验证
 ./gradlew runIde       # 沙箱 IDE
 ./gradlew buildPlugin  # 可分发 zip
 ```
 
-JDK 21 toolchain，IntelliJ Platform Gradle Plugin 2.x，目标 2026.1，`sinceBuild=243`。
+JDK 21 toolchain，IntelliJ Platform Gradle Plugin 2.x，编译目标 2026.1，`sinceBuild=243`，`untilBuild=263.*`（2026.3）。
 
 ## 设计说明
 

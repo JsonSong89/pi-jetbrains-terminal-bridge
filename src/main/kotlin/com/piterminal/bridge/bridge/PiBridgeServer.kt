@@ -9,30 +9,14 @@ import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
 import com.piterminal.bridge.conversations.PiConversationService
-import java.io.BufferedReader
-import java.io.InputStreamReader
+import java.util.concurrent.Semaphore
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.security.SecureRandom
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 
-/**
- * Loopback TCP bridge between IDEA and the pi extension
- * (~/.pi/agent/extensions/pi-launcher-bridge.ts).
- *
- * Protocol: one JSON object per line, per-request connections from pi side.
- * Envelope: {v, seq, type, tabKey, token, data}. Unknown types are dropped.
- *
- * De-duplication is scoped per (tabKey, type): each message is an independent
- * short connection, so delivery order is not guaranteed — a single seq
- * timeline per tab would drop an earlier session_changed after a later
- * agent_state arrived first. State messages are idempotent, so per-type
- * last-write-wins is sufficient.
- *
- * Handlers are dispatched on the EDT; conversations state, persistence and
- * notifications all touch UI-visible components.
- */
+/** Loopback listener: authenticated v2 operation connections plus legacy v1 notification events. */
 @Service(Service.Level.PROJECT)
 class PiBridgeServer(private val project: Project) : Disposable {
 
@@ -43,6 +27,14 @@ class PiBridgeServer(private val project: Project) : Disposable {
 
     private val gson = Gson()
     private val lastSeqByKey = ConcurrentHashMap<String, Long>()
+
+    private val clients = Semaphore(64)
+    private val connections = ConcurrentHashMap<String, BridgeConnection>()
+    // v2 ownership persists through disconnect: delayed v1 events cannot rebind the tab.
+    private val managedTabs = ConcurrentHashMap.newKeySet<String>()
+
+    fun connection(tabKey: String): BridgeConnection? = connections[tabKey]?.takeIf { it.alive }
+    fun owns(tabKey: String): Boolean = tabKey in managedTabs
 
     class Endpoint(val port: Int, val token: String)
 
@@ -78,7 +70,8 @@ class PiBridgeServer(private val project: Project) : Disposable {
         while (!socket.isClosed) {
             try {
                 val client = socket.accept()
-                val handler = Thread({ handle(client) }, "PiBridgeClient")
+                if (!clients.tryAcquire()) { client.close(); continue }
+                val handler = Thread({ try { handle(client) } finally { clients.release() } }, "PiBridgeClient")
                 handler.isDaemon = true
                 handler.start()
             } catch (_: Exception) {
@@ -90,19 +83,38 @@ class PiBridgeServer(private val project: Project) : Disposable {
     private fun handle(client: java.net.Socket) {
         try {
             client.use { s ->
-                s.soTimeout = 10_000
-                val reader = BufferedReader(InputStreamReader(s.getInputStream(), Charsets.UTF_8))
-                while (true) {
-                    val line = reader.readLine() ?: break
-                    if (line.length > MAX_LINE_LENGTH) {
-                        logger.warn("Pi bridge: dropping oversized line (${line.length} chars)")
-                        continue
-                    }
-                    if (line.isNotBlank()) handleMessage(line.trim())
+                s.soTimeout = 5_000
+                // Do not prefetch past hello; BridgeConnection owns the remaining stream.
+                val first = BridgeProtocol.readFrame(s.getInputStream()) ?: return
+                if (first.get("v")?.asInt == 1) {
+                    handleMessage(gson.toJson(first))
+                    return
                 }
+                require(first.get("v")?.asInt == 2 && str(first, "type") == "hello")
+                require(str(first, "token") == token)
+                val tab = str(first, "tabKey") ?: return
+                if (PiConversationService.getInstance(project).get(tab) == null) return
+                val operations = BridgeOperations.getInstance(project)
+                val connection = BridgeConnection(s, first, operations::receive) { old ->
+                    if (connections.remove(old.tabKey, old)) operations.disconnected(old)
+                }
+                // No unproven simultaneous runtime takeover. Reconnect after a closed socket is allowed;
+                // unresolved requests keep their original runtime/session ownership in the journal.
+                synchronized(connections) {
+                    if (connections[tab]?.alive == true) return
+                    connections[tab] = connection
+                    managedTabs.add(tab)
+                }
+                connection.send(BridgeProtocol.frame("welcome").apply {
+                    addProperty("connectionId", connection.id)
+                    addProperty("protocolVersion", 2)
+                })
+                operations.connected(connection)
+                connection.run()
             }
-        } catch (_: Exception) {
-            // per-request connections; failures are expected
+        } catch (e: Exception) {
+            // Malformed/authentication/EOF failures close only this client.
+            logger.debug("Pi bridge client closed: ${e.message}")
         }
     }
 
@@ -110,7 +122,7 @@ class PiBridgeServer(private val project: Project) : Disposable {
         val envelope = try {
             gson.fromJson(line, JsonObject::class.java)
         } catch (e: Exception) {
-            logger.warn("Pi bridge: unparseable message: ${e.message}")
+            logger.warn("Pi bridge: unparseable legacy message")
             return
         }
 
@@ -133,9 +145,11 @@ class PiBridgeServer(private val project: Project) : Disposable {
         // independent connections may reorder, so types never share a timeline.
         if (seq > 0) {
             val key = "$tabKey\u0000$type"
-            val last = lastSeqByKey[key] ?: 0L
-            if (seq <= last) return
-            lastSeqByKey[key] = seq
+            var accepted = false
+            lastSeqByKey.compute(key) { _, last ->
+                if (seq > (last ?: 0L)) { accepted = true; seq } else last
+            }
+            if (!accepted) return
         }
 
         if (project.isDisposed) return
@@ -143,15 +157,23 @@ class PiBridgeServer(private val project: Project) : Disposable {
         // Handlers touch UI-visible state (persist + notifications); dispatch on EDT.
         ApplicationManager.getApplication().invokeLater {
             if (project.isDisposed) return@invokeLater
+            // State events: only the newest of a burst matters. file_modified carries a
+            // distinct path per seq, so every one must be routed.
+            if (seq > 0 && type in latestOnlyTypes && lastSeqByKey["$tabKey\u0000$type"] != seq) return@invokeLater
             route(tabKey, type, data)
         }
     }
 
     private fun route(tabKey: String, type: String, data: JsonObject) {
         val service = PiConversationService.getInstance(project)
-        logger.debug("bridge message: type=$type tab=$tabKey data=$data")
-        // Orphan routing: handlers drop unknown tabKeys silently.
+        if (service.get(tabKey) == null) return
+        if (owns(tabKey) && type in setOf("session_changed", "session_stopped")) return
         when (type) {
+            // Once v2 owns the tab, snapshots are the single owner of working state;
+            // v1 agent_state stays notification telemetry only and must not race them.
+            "agent_state" if owns(tabKey) -> str(data, "state")?.let {
+                service.onBridgeAgentStateTelemetry(tabKey, it, str(data, "stopReason"))
+            }
             "session_changed" -> str(data, "sessionId")?.let {
                 service.onBridgeSessionChanged(tabKey, it, str(data, "extensionVersion"))
             }
@@ -177,6 +199,7 @@ class PiBridgeServer(private val project: Project) : Disposable {
     }
 
     override fun dispose() {
+        connections.values.toList().forEach { it.close() }
         try {
             serverSocket?.close()
         } catch (_: Exception) {
@@ -188,8 +211,8 @@ class PiBridgeServer(private val project: Project) : Disposable {
     override fun toString(): String = "PiBridgeServer(port=${serverSocket?.localPort})"
 
     companion object {
-        const val PROTOCOL_VERSION = 1
-        private const val MAX_LINE_LENGTH = 64 * 1024
+        const val PROTOCOL_VERSION = 1 // legacy event envelope; v2 is negotiated by hello
+        private val latestOnlyTypes = setOf("agent_state", "model_changed", "session_changed", "session_stopped")
 
         fun getInstance(project: Project): PiBridgeServer = project.service()
     }

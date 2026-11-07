@@ -28,6 +28,9 @@ It is **not** a vibe-coding cockpit. It is for people who want more control over
 - **One-click launch** — the toolbar button opens a dedicated Pi tab in the Terminal tool window and runs `pi` with your configured model / thinking level / extra args.
 - **Send to Pi** — select code in the editor, right-click → *Send to Pi*, and a file reference (`@path/file.go#L10-25`) lands in Pi's input.
 - **Fork / Rewind on every message** — each user-message card carries both actions, with deliberately different semantics: **fork** creates a new conversation that keeps history **up to and including** that message and its full reply (everything after is dropped, input left empty); **rewind** keeps the same session and moves the branch back to **before** that message (pi's `/tree` semantics — the message and later turns drop out of the model context, text back in the input for editing).
+- **Navigate long histories** — messages longer than ~480 chars collapse to four lines with an *Expand* link, and a thin rail next to the scroll bar puts one tick per message, spaced evenly by message index (a single huge message can't squeeze the rest out of reach). Click a tick to land on that message's header; `Alt+Up` / `Alt+Down` walk message by message.
+- **History mirrors Pi's branch** — cards are rendered from Pi's current native active branch with original entry ids and order, not by matching locally sent text; a card appears once Pi records the entry, and a quiet `user/assistant+tool` count sits above the input.
+- **Scroll stays where you left it** — the history list no longer jumps to the bottom on agent state changes; it only follows the tail when you send, or when you were already near the bottom.
 - **Stay in sync with Pi's writes** — as soon as Pi finishes a write/edit tool, the IDE refreshes that file so you don't wait on the ~10s VFS poll. Optionally also open the file in the editor.
 - **Notifications (opt-in)**
   - balloon when the agent finishes (including error/abort reason) — only while the IDE is in the background; click to focus that terminal
@@ -44,10 +47,10 @@ IDEA (PiBridgeServer, loopback TCP + token)
 Terminal tab  ──  ~/.pi/agent/extensions/pi-launcher-bridge.ts (lazy-installed, content-compared)
 ```
 
-- The extension is installed on first terminal launch and reports `session_changed`, `agent_state`, `model_changed`, `file_modified` (from `tool_result`, when the file is actually written).
-- The plugin injects the session id at launch; `/new`-style runtime rebinds arrive as `session_changed` and archive the previous session.
-- Protocol: `{v, seq, type, tabKey, token, data}` — one JSON object per line, de-dup per `(tabKey, type)`, unknown types dropped, version mismatches dropped loudly.
-- Everything is best-effort: if the bridge dies, conversations still work via manual resume.
+- The managed extension (VERSION **10**) runs in the same interactive TUI process. A v2 authenticated connection carries requests, results and full native active-branch snapshots; it never starts a second pi process or uses RPC mode.
+- Rewind and Fork require the verified API baseline **pi 1.5.0 / session v3** and advertised capabilities. Unsupported versions keep control actions disabled; launch, send, history and notifications keep working.
+- Modification requests are saved and sent once. Disconnects and timeouts preserve the panel and query the original request id; reconnect never replays a modification. The toolbar offers **Sync current session** only when an unresolved operation has ended and can be reconciled.
+- Working/model/file notifications retain the v1 path. Fork and Rewind use v2 operations. Once v2 owns a tab, delayed v1 session events cannot rebind it. See the [protocol](docs/bridge-protocol.md) for developer contracts.
 
 ## Usage
 
@@ -75,34 +78,56 @@ command works exactly as on the command line:
   - `/new` after wrapping up — the previous session is archived in the panel, still resumable later
 
 Each user-message card in the panel also carries a **Fork** button (branch icon,
-next to Rewind, Copy and Delete): it creates a new conversation `<original>-fork`
+next to Rewind and Copy): it creates a new conversation `<original>-fork`
 that keeps the history **up to and including** that message and its reply —
 everything after it is dropped — with an empty input, so you continue from that
 exact point in a fresh session. The original conversation stays untouched.
-Under the hood the plugin launches pi with `--fork <session>` and the bridge
-extension's `/bridge-fork` command (fork at the turn's leaf entry) trims the
-copy. The endpoint is the last entry before the next user message, including
-all tool calls/results and the final reply, not just the first assistant entry.
-The command is sent once after the first bridge bind, with a short startup
-settling delay. Then IDEA checks the bound session id every 1.5 seconds, at
-most six times; a changed id confirms the fork, otherwise it logs a timeout.
-Checks are read-only and never rewrite the TUI input.
+Under the hood the plugin creates a full CLI copy in a separate Terminal, waits
+for its bridge capability and complete snapshot, then verifies the selected turn
+by native entry identities. A single v2 request forks at the turn's leaf through
+the public API. The endpoint includes all tool calls/results and the final reply.
+The replacement session confirms its branch through a durable handoff; only
+then does the panel trim its copy. The intermediate copy is not archived.
 This panel action deliberately differs from native `/fork`'s default edit-before
 behavior.
 
-The **Rewind** button (undo icon, left of Fork) calls `navigateTree` on the
-selected user message's **parent** in the same session — no new session, no
-terminal restart. The selected message itself and everything after it leave
-the active branch and model context. Only the IDEA input is pre-filled with
-the selected text for editing; the TUI editor is not pre-filled. Tree entries
-remain in the jsonl. Rewinding the first entry without a parent is currently
-unsupported and reports a warning.
+Fork rejects busy sessions, messages absent from the current native branch, labelled sessions and a target
+TUI editor containing input. Your source Terminal and IDEA draft stay intact.
+During preparation, the toolbar's **Stop fork preparation** icon can stop the
+workflow and keep the full copy. After
+submission, disconnects only query the original operation id; they never start
+another Terminal or repeat the fork. A failed or unconfirmed fork keeps the
+copy visible for inspection.
 
-Bridge command regression tests (no IDE or Gradle build required):
-`node --test tests/bridge-extension.test.mjs`. CI runs these against the actual
-packaged resource before building. Extension VERSION stays **6** before tagging;
-installation compares full file contents, and updated code takes effect in a
-newly opened Pi terminal.
+The **Rewind** button (undo icon, left of Fork) uses the bidirectional bridge to
+navigate within the same session. It keeps the panel unchanged until pi confirms
+the result and the full branch snapshot passes validation. The selected user
+message and later turns leave the active branch; the tree entries remain in the
+jsonl. No rewind command is pasted into the Terminal editor.
+
+Rewind is rejected while pi is busy, for a root message without a parent, or
+when the parent is another user/custom message: those targets could otherwise
+move to the wrong point or change the TUI editor. If you edit the IDEA draft
+while waiting, it is preserved and the selected text is available through
+**Restore text**. The input bar also shows a quiet `user/assistant+tool` count
+from the latest subscribed v2 branch snapshot. State updates arrive automatically.
+When recovery is possible, **Sync current session** appears as a toolbar icon;
+it never repeats the operation. **Restore text** is also a conditional toolbar
+icon. Hover over an icon to see its action. The lower-left workspace-files action
+uses a compact icon button.
+
+History cards come directly from Pi's current native branch, with original session/entry ids and branch order. Rewind, Fork and Copy sit at the card's lower right. The panel no longer matches locally sent text to session messages. A send appears in history only after Pi records a user entry; `/model` creates no card, while skills/templates show their recorded expanded text.
+
+The first valid snapshot replaces old local cards and ignores obsolete hidden records, so previously hidden messages on the current branch become visible again. Drafts are preserved. Before connection, saved messages are an offline cache; Rewind/Fork require a verified online snapshot. Session parsing and branch traversal stay in Pi's public SessionManager API, exposed through the existing bridge.
+
+Validation entry points: `node --test tests/bridge-extension.test.mjs`, Gradle
+`test`, and the opt-in real TUI smoke
+`PI_BINARY=/path/to/pi python3 tests/bridge-tui-smoke.py` (rewind and fork, including
+runtime replacement). CI can run the smoke
+through the `tui_smoke` workflow input; the extension tests and Gradle tests run
+on every build. Installation
+compares full resource contents, and updated code loads in a new Pi Terminal
+or after pi `/reload`.
 
 In short: the IDE panel gives you structure (persistent list, working badges,
 archived sessions, click-to-resume), the TUI gives you pi's full interactive
@@ -127,17 +152,20 @@ Defaults — rebindable in **Settings → Keymap → "Pi Terminal Bridge"**:
 - `Alt+Shift+3` — send selection / file to Pi
 - `Ctrl+Alt+Shift+T` — focus the Pi terminal (only while the prompt input is focused; does not steal Refactor This from the editor)
 - `Ctrl+Alt+Shift+E` — focus the Pi prompt (only while a Pi terminal tab is focused)
+- `Alt+Up` / `Alt+Down` — jump to the previous / next message header in the history area (only while the history area is focused)
 
 ## Build
 
 ```bash
-node --test tests/bridge-extension.test.mjs   # bridge extension command handlers (fast, no Gradle)
+node --test tests/bridge-extension.test.mjs   # packaged extension and fault contracts
+./gradlew test         # JVM protocol/projection/commit contracts
+PI_BINARY=/path/to/pi python3 tests/bridge-tui-smoke.py  # opt-in real pi 1.5.0 PTY smoke
 ./gradlew build        # verify
 ./gradlew runIde       # sandbox IDE
 ./gradlew buildPlugin  # distributable zip
 ```
 
-JDK 21 toolchain, IntelliJ Platform Gradle Plugin 2.x, target 2026.1, `sinceBuild=243`.
+JDK 21 toolchain, IntelliJ Platform Gradle Plugin 2.x, compile against 2026.1, `sinceBuild=243`, `untilBuild=263.*` (2026.3).
 
 ## Design notes
 

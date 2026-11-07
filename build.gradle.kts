@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "com.piterminal.bridge"
-version = "0.3.5"
+version = "0.4.0"
 
 repositories {
     mavenCentral()
@@ -15,6 +15,8 @@ repositories {
 }
 
 dependencies {
+    testImplementation(kotlin("test-junit"))
+    testImplementation("com.google.code.gson:gson:2.11.0")
     intellijPlatform {
         intellijIdea("2026.1")
         bundledPlugin("org.jetbrains.plugins.terminal")
@@ -46,11 +48,15 @@ tasks {
 
     patchPluginXml {
         sinceBuild.set("243")
-        untilBuild.set("262.*")
+        untilBuild.set("263.*")
     }
 
     buildSearchableOptions {
         enabled = false
+    }
+
+    test {
+        testLogging { events("passed", "skipped", "failed") }
     }
 
     signPlugin {
