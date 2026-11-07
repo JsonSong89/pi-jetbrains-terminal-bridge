@@ -16,6 +16,7 @@ import com.intellij.ui.content.ContentManagerEvent
 import com.intellij.ui.content.ContentManagerListener
 import com.piterminal.bridge.PiBridgeUi
 import com.piterminal.bridge.bridge.PiBridgeInstaller
+import com.piterminal.bridge.bridge.BridgeOperations
 import com.piterminal.bridge.bridge.PiBridgeServer
 import com.piterminal.bridge.settings.PiSettings
 import com.intellij.openapi.util.SystemInfo
@@ -75,7 +76,7 @@ class PiTerminalService(private val project: Project) : Disposable {
         tabName: String,
         piSessionId: String,
         title: String,
-        forkOf: String? = null
+        forkSourceFile: String? = null
     ) {
         val existing = sessions[conversationId]
         if (existing != null && isTerminalAlive(existing)) {
@@ -91,7 +92,7 @@ class PiTerminalService(private val project: Project) : Disposable {
             val workingDir = project.basePath ?: System.getProperty("user.home")
             createTerminalTab(conversationId, tabName, workingDir)
             PiStatusWidget.update(project)
-            startPiWithDelay(conversationId, piSessionId, title, workingDir, forkOf)
+            startPiWithDelay(conversationId, piSessionId, title, workingDir, forkSourceFile)
         } catch (e: Exception) {
             logger.error("Failed to launch Pi terminal for $tabName", e)
             reset(conversationId, notify = false)
@@ -259,17 +260,18 @@ class PiTerminalService(private val project: Project) : Disposable {
         piSessionId: String,
         title: String,
         workingDir: String,
-        forkOf: String? = null
+        forkSourceFile: String? = null
     ) {
         PiBridgeInstaller.ensureInstalled()
         val endpoint = PiBridgeServer.getInstance(project).ensureStarted()
+        val journalDirectory = BridgeOperations.getInstance(project).store.remoteDirectory(conversationId).toString()
 
         val settings = PiSettings.getInstance().state
         // Best-effort: prefer an explicit jsonl path so resume is unambiguous.
         // When it misses we fall back to --session-id, which pi itself resolves
         // (resume-if-exists / create-if-not) against its own session-dir config,
         // so the plugin never has to predict pi's storage layout.
-        val existingFile = findSessionFile(piSessionId, workingDir)
+        val existingFile = if (forkSourceFile == null) findSessionFile(piSessionId, workingDir) else null
         val extra = sanitizeExtraArgs(settings.extraArgs)
         if (extra.dropped.isNotEmpty()) {
             val flags = extra.dropped.distinct().joinToString(", ")
@@ -294,24 +296,21 @@ class PiTerminalService(private val project: Project) : Disposable {
                     append("\$env:PI_LAUNCHER_PORT='${endpoint.port}'; ")
                     append("\$env:PI_LAUNCHER_TOKEN='${endpoint.token}'; ")
                     append("\$env:PI_LAUNCHER_TAB_KEY='$conversationId'; ")
+                    append("\$env:PI_LAUNCHER_JOURNAL_DIR=${quote(journalDirectory)}; ")
                 } else {
                     // `env` prefix works in bash/zsh/fish alike, unlike VAR=val.
                     append("env PI_LAUNCHER_PORT=${endpoint.port} ")
                     append("PI_LAUNCHER_TOKEN='${endpoint.token}' ")
                     append("PI_LAUNCHER_TAB_KEY='$conversationId' ")
+                    append("PI_LAUNCHER_JOURNAL_DIR=${quote(journalDirectory)} ")
                 }
             }
 
             append(settings.piCommand)
 
-            if (forkOf != null) {
-                // Fork: copy the source session into a brand-new session file.
-                // Prefer the explicit jsonl path; fall back to the raw id and let
-                // pi resolve it (it searches the current project first).
-                // --session-id picks the new session's id; --fork never combines
-                // with --session/--continue/--resume.
-                val sourceFile = findSessionFile(forkOf, workingDir)
-                append(" --fork ${quote(sourceFile?.toString() ?: forkOf)}")
+            if (forkSourceFile != null) {
+                // The verified snapshot supplies the native path, including custom session directories.
+                append(" --fork ${quote(forkSourceFile)}")
                 append(" --session-id ${quote(piSessionId)}")
             } else if (existingFile != null) {
                 // Explicit path: pi's path branch opens it directly (a path

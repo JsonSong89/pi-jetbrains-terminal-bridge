@@ -46,10 +46,10 @@ IDEA（PiBridgeServer，loopback TCP + token）
 Terminal 标签页 ── ~/.pi/agent/extensions/pi-launcher-bridge.ts（懒安装，按完整内容比对更新）
 ```
 
-- extension 在首次终端启动时安装，上报 `session_changed`、`agent_state`、`model_changed`、`file_modified`（取自 `tool_result`，文件实际写完之后）。
-- 插件在启动时注入 session id；运行期 `/new` 类换绑通过 `session_changed` 事件归档旧会话并绑定新会话。
-- 协议：`{v, seq, type, tabKey, token, data}` —— 每行一个 JSON 对象，按 `(tabKey, type)` 去重，未知 type 丢弃，版本不匹配显式告警。
-- 全链路尽力而为：桥接失效时会话功能不受影响，退化为手动恢复。
+- 托管 extension（VERSION **9**）仍运行在同一个交互式 TUI 进程里；v2 认证长连接传输请求、结果和完整原生活跃分支快照，不使用 RPC mode 或另起 pi 进程。
+- Rewind / Fork 的 API 基线锁定 **pi 1.5.0 / session v3**，还需通过内部命令 probe 并声明 capability；不支持的版本关闭控制操作。本轮 Fork 迁移仍待 CI、真实 TUI 和 IDE 集成验收。
+- 修改请求先落盘、只发送一次。断联和超时保留面板原状，只查询原 requestId；重连不重放修改。确认旧执行结束后，可用 `Sync` 显式对账当前状态。
+- working/model/写文件通知暂时保留 v1；Fork / Rewind 都经 v2 操作。v2 接管过的 tab 不会再被迟到的 v1 会话事件换绑。开发契约见[通信协议](docs/bridge-protocol.md)。
 
 ## 使用方式
 
@@ -75,22 +75,33 @@ Pi 标签页是**真实终端里跑着完整的 pi TUI** —— 所有斜杠命�
 
 面板里每条用户消息卡片还带一个 **Fork** 按钮（分支图标）：新建会话 `<原会话>-fork`，
 保留**到该消息（含其回复）为止**的历史、其后全部丢弃，输入框留空，从这个点在新会话里
-继续追问，原会话不受影响。实现上插件先以 `--fork <session>` 拉起包含全量历史的新终端，首次 bridge bind 后只发送一次
-首次 bridge bind 后等待 TUI 启动，再只发送一次 `/bridge-fork`；之后 IDEA 每 1.5 秒只读检查
-绑定的 session id，最多 6 次。id 变化即确认 fork 成功，否则记录超时。检查不会重发命令，
-也不会反复写入 TUI 输入栏。
+继续追问，原会话不受影响。插件先以 CLI 创建独立的全量副本 Terminal，等待 bridge 能力和
+完整快照就绪，再按原生 entry 身份核对选中的完整 turn。随后仅提交一次 v2 分叉请求，
+通过公开 API 在该轮最后一个 entry 分叉，包含工具调用、工具结果和最终回复。
+新会话经耐久 handoff 确认完整分支后，面板才裁剪；中间副本不会归档成额外会话。
 
-**Rewind** 按钮（撤销图标，位于 Fork 左侧）是会话内变体：在同一 session 里调
-`navigateTree` —— 不新建会话、不重启终端 —— 裁剪点与 fork 不同：该消息**也一并移出**活跃分支、
-退出模型上下文，且该消息文本预填到面板输入框待改重发。树上的 entry 仍留在 jsonl 里，
-与 `/tree` 行为一致。首条消息没有 parent 时暂不支持回退，会显示警告。
+Fork 会拒绝忙碌会话、有歧义的旧卡片、带 label 的会话，以及目标 TUI 输入框已有内容的情况。
+源 Terminal 和 IDEA 草稿保留。准备期间可点 **Sync** 停止并保留全量副本；请求提交后，
+断联只查询原操作 ID，不重复拉起 Terminal 或再次 fork。失败或未知时保留副本供检查。
 
-Fork 的截点是下一条用户消息之前的最后一个 entry，包含该轮全部工具调用、工具结果和最终回复，
-而不是第一条 assistant 消息。这与 pi 原生 `/fork` 默认“选中消息之前 + 回填编辑”的行为有意不同。
+**Rewind** 按钮（撤销图标，位于 Fork 左侧）经双向 bridge 在同一 session 内导航。
+面板保留原状，收到 pi 确认结果并核验完整分支快照后才更新；选中的用户消息及后续对话
+退出活跃分支，树上的 entry 仍保留在 jsonl。控制命令不再粘贴到 Terminal 编辑器。
 
-命令回归测试：`node --test tests/bridge-extension.test.mjs`（不需要 IDEA 或 Gradle 构建）。
-CI 会执行实际打包资源里的两个 handler。打 tag 前扩展 VERSION 保持 **6**，安装时按文件全内容
-比较更新；更新后的代码在新打开的 Pi 终端中生效。
+pi 忙碌、首条消息无 parent，或 parent 是另一条 user/custom message 时，会在执行前拒绝，
+避免多退或改变 TUI 编辑器。等待期间编辑 IDEA 草稿不会被覆盖，回退文本会保存在
+**Restore text** 入口，点击追加。输入栏左下角会用最新 v2 分支快照显示低调的
+`用户/AI+tool` 次数。**Sync** 可刷新当前状态，或在确认旧执行结束后显式对账；
+它不会重做回退。未知期间可以查看、复制和编辑草稿，同一会话的冲突修改会被锁住。
+
+卡片使用原生 session/entry id 绑定；删除只保存本地隐藏记录，后续快照不会把它恢复。
+有歧义的旧卡片保留且禁用回退。首次迁移保留原面板可见性，因此迁移前仅在 TUI 输入的历史
+也可能继续在面板隐藏；初始化后的新 TUI 用户消息会正常显示。
+
+验证入口：`node --test tests/bridge-extension.test.mjs`、Gradle `test`，以及显式运行的
+`PI_BINARY=/path/to/pi python3 tests/bridge-tui-smoke.py`（真实 pi 1.5.0 PTY smoke，覆盖 rewind 与 fork 的运行时替换）。
+CI 手动触发可勾选 `tui_smoke`。本次重构仍需执行这些验证，不能把源码交付视为兼容性已通过。
+安装按资源全文比较更新，新 Terminal 或 pi `/reload` 后加载。
 
 一句话：IDE 面板负责结构（持久列表、运行徽标、归档、点击恢复），TUI 负责 pi 的完整交互能力，两者随意组合。
 
@@ -118,7 +129,9 @@ CI 会执行实际打包资源里的两个 handler。打 tag 前扩展 VERSION �
 ## 构建
 
 ```bash
-node --test tests/bridge-extension.test.mjs   # bridge 扩展命令 handler（秒级，无需 Gradle）
+node --test tests/bridge-extension.test.mjs   # 打包资源和故障契约
+./gradlew test         # JVM 协议/投影/提交契约
+PI_BINARY=/path/to/pi python3 tests/bridge-tui-smoke.py  # 显式执行真实 pi 1.5.0 PTY smoke
 ./gradlew build        # 验证
 ./gradlew runIde       # 沙箱 IDE
 ./gradlew buildPlugin  # 可分发 zip

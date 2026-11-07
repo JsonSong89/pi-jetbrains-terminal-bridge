@@ -27,11 +27,20 @@ class PiConversationStore(private val project: Project) : PersistentStateCompone
         var createdAt: Long = 0
         var draft: String = ""
         var messages: MutableList<Msg> = mutableListOf()
+        var draftRevision: Long = 0
+        var viewRevision: Long = 0
+        var hiddenEntries: MutableList<String> = mutableListOf()
+        var hiddenLegacy: MutableList<Msg> = mutableListOf()
+        var recoveryText: String = ""
+        var appliedOperations: MutableList<String> = mutableListOf()
+        var projectionInitialized: Boolean = false
     }
 
     class Msg {
         var text: String = ""
         var timestamp: Long = 0
+        var sessionId: String? = null
+        var entryId: String? = null
     }
 
     class State {
@@ -65,7 +74,12 @@ class PiConversationStore(private val project: Project) : PersistentStateCompone
             piSessionId = e.piSessionId,
             createdAt = e.createdAt,
             draft = e.draft,
-            messages = e.messages.map { PiUserMessage(it.text, it.timestamp) }
+            messages = e.messages.map { PiUserMessage(it.text, it.timestamp, it.sessionId, it.entryId) },
+            draftRevision = e.draftRevision, viewRevision = e.viewRevision,
+            hiddenEntries = e.hiddenEntries.toSet(),
+            hiddenLegacy = e.hiddenLegacy.map { PiUserMessage(it.text, it.timestamp, it.sessionId, it.entryId) },
+            recoveryText = e.recoveryText, appliedOperations = e.appliedOperations.toSet(),
+            projectionInitialized = e.projectionInitialized
         )
     }
 
@@ -84,15 +98,21 @@ class PiConversationStore(private val project: Project) : PersistentStateCompone
                 piSessionId = c.piSessionId
                 createdAt = c.createdAt
                 draft = c.draft
-                messages = c.messages.map { m ->
-                    Msg().apply {
-                        text = m.text
-                        timestamp = m.timestamp
-                    }
-                }.toMutableList()
+                draftRevision = c.draftRevision
+                viewRevision = c.viewRevision
+                hiddenEntries = c.hiddenEntries.toMutableList()
+                hiddenLegacy = c.hiddenLegacy.map { message(it) }.toMutableList()
+                recoveryText = c.recoveryText
+                appliedOperations = c.appliedOperations.toMutableList()
+                projectionInitialized = c.projectionInitialized
+                messages = c.messages.map { message(it) }.toMutableList()
             }
         }.toMutableList()
         myState.activeId = activeId
+    }
+
+    private fun message(m: PiUserMessage): Msg = Msg().apply {
+        text = m.text; timestamp = m.timestamp; sessionId = m.sessionId; entryId = m.entryId
     }
 
     data class StoredConversation(
@@ -102,7 +122,14 @@ class PiConversationStore(private val project: Project) : PersistentStateCompone
         val piSessionId: String,
         val createdAt: Long,
         val draft: String,
-        val messages: List<PiUserMessage>
+        val messages: List<PiUserMessage>,
+        val draftRevision: Long,
+        val viewRevision: Long,
+        val hiddenEntries: Set<String>,
+        val hiddenLegacy: List<PiUserMessage>,
+        val recoveryText: String,
+        val appliedOperations: Set<String>,
+        val projectionInitialized: Boolean
     )
 
     companion object {
