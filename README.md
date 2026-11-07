@@ -164,7 +164,7 @@ PI_BINARY=/path/to/pi python3 tests/bridge-tui-smoke.py  # opt-in real pi 1.5.0 
 ./gradlew buildPlugin  # distributable zip
 ```
 
-JDK 21 toolchain, IntelliJ Platform Gradle Plugin 2.x, target 2026.1, `sinceBuild=243`.
+JDK 21 toolchain, IntelliJ Platform Gradle Plugin 2.x, compile against 2026.1, `sinceBuild=243`, `untilBuild=263.*` (2026.3).
 
 ## Design notes
 

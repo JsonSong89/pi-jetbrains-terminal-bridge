@@ -139,7 +139,7 @@ PI_BINARY=/path/to/pi python3 tests/bridge-tui-smoke.py  # 显式执行真实 pi
 ./gradlew buildPlugin  # 可分发 zip
 ```
 
-JDK 21 toolchain，IntelliJ Platform Gradle Plugin 2.x，目标 2026.1，`sinceBuild=243`。
+JDK 21 toolchain，IntelliJ Platform Gradle Plugin 2.x，编译目标 2026.1，`sinceBuild=243`，`untilBuild=263.*`（2026.3）。
 
 ## 设计说明
 

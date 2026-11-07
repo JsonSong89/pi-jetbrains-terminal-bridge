@@ -11,7 +11,7 @@
 ## 构建
 
 - `./gradlew build` / `runIde`（沙箱）/ `buildPlugin`（打包）
-- JDK 21 toolchain；IntelliJ Platform Gradle Plugin 2.x，目标 2026.1，`sinceBuild=243`
+- JDK 21 toolchain；IntelliJ Platform Gradle Plugin 2.x，编译目标 2026.1，`sinceBuild=243`，`untilBuild=263.*`（2026.3）
 - 依赖 terminal 插件（反射调用 `TerminalToolWindowManager.createLocalShellWidget`，保持零废弃 API 姿势）
 
 ## 包结构约定
