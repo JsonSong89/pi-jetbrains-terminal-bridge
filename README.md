@@ -48,7 +48,7 @@ Terminal tab  ──  ~/.pi/agent/extensions/pi-launcher-bridge.ts (lazy-install
 
 - The managed extension (VERSION **9**) runs in the same interactive TUI process. A v2 authenticated connection carries requests, results and full native active-branch snapshots; it never starts a second pi process or uses RPC mode.
 - Rewind and Fork require the verified API baseline **pi 1.5.0 / session v3**, a successful command-dispatch probe and advertised capabilities. Unsupported versions keep control actions disabled. The Fork migration still needs CI, real TUI and IDE acceptance.
-- Modification requests are saved and sent once. Disconnects and timeouts preserve the panel and query the original request id; reconnect never replays a modification. `Sync` can reconcile confirmed current state after the old execution is known to have ended.
+- Modification requests are saved and sent once. Disconnects and timeouts preserve the panel and query the original request id; reconnect never replays a modification. The toolbar offers **Sync current session** only when an unresolved operation has ended and can be reconciled.
 - Working/model/file notifications retain the v1 path. Fork and Rewind use v2 operations. Once v2 owns a tab, delayed v1 session events cannot rebind it. See the [protocol](docs/bridge-protocol.md) for developer contracts.
 
 ## Usage
@@ -77,7 +77,7 @@ command works exactly as on the command line:
   - `/new` after wrapping up — the previous session is archived in the panel, still resumable later
 
 Each user-message card in the panel also carries a **Fork** button (branch icon,
-next to Rewind, Copy and Delete): it creates a new conversation `<original>-fork`
+next to Rewind and Copy): it creates a new conversation `<original>-fork`
 that keeps the history **up to and including** that message and its reply —
 everything after it is dropped — with an empty input, so you continue from that
 exact point in a fresh session. The original conversation stays untouched.
@@ -92,7 +92,8 @@ behavior.
 
 Fork rejects busy sessions, ambiguous old cards, labelled sessions and a target
 TUI editor containing input. Your source Terminal and IDEA draft stay intact.
-During preparation, **Sync** can stop the workflow and keep the full copy. After
+During preparation, the toolbar's **Stop fork preparation** icon can stop the
+workflow and keep the full copy. After
 submission, disconnects only query the original operation id; they never start
 another Terminal or repeat the fork. A failed or unconfirmed fork keeps the
 copy visible for inspection.
@@ -108,12 +109,16 @@ when the parent is another user/custom message: those targets could otherwise
 move to the wrong point or change the TUI editor. If you edit the IDEA draft
 while waiting, it is preserved and the selected text is available through
 **Restore text**. The input bar also shows a quiet `user/assistant+tool` count
-from the latest subscribed v2 branch snapshot. **Sync** refreshes state, or
-explicitly reconciles unresolved results once execution is confirmed ended; it
-never repeats the rewind.
+from the latest subscribed v2 branch snapshot. State updates arrive automatically.
+When recovery is possible, **Sync current session** appears as a toolbar icon;
+it never repeats the operation. **Restore text** is also a conditional toolbar
+icon. Hover over an icon to see its action. The lower-left workspace-files action
+uses a compact icon button.
 
-Cards are bound to native session/entry ids. Removing a card stores a local
-hidden record, so later snapshots keep it hidden. Ambiguous old cards stay
+Cards are bound to native session/entry ids. Rewind, Fork and Copy sit at the
+card's lower right.
+Use Rewind to adjust the active history. Existing hidden records remain compatible.
+Ambiguous old cards stay
 unbound and cannot be rewound. The first migration preserves the old panel's
 visibility; older messages that were only in the TUI may stay hidden in the
 panel, while new TUI messages appear after initialization.

@@ -99,7 +99,7 @@ class ForkWorkflow(private val project: Project, private val service: PiConversa
         bridge.dispatchPrepared(id, METHOD, params, snapshot)
     }
 
-    /** Sync can stop a preparation whose execution request does not exist. */
+    /** Stop a preparation whose execution request does not exist. */
     fun stopPreparing(tab: String): Boolean {
         val records = bridge.recordsFor(tab).filter { BridgeProtocol.string(it, "localState") == "preparing" }
         records.forEach { stop(BridgeProtocol.string(it, "id")!!, "Fork preparation stopped. The copy was kept; no fork request was sent.") }

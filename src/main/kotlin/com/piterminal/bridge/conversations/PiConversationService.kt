@@ -42,6 +42,12 @@ class PiConversationService(private val project: Project) {
 
     fun operationStatus(id: String): String? = bridge.status(id)
     fun hasPendingOperation(id: String): Boolean = bridge.locked(id)
+    enum class OperationRecovery { STOP_PREPARATION, SYNC_CURRENT_STATE }
+    fun operationRecovery(id: String): OperationRecovery? = when {
+        bridge.preparing(id) -> OperationRecovery.STOP_PREPARATION
+        operations.canReconcile(id) -> OperationRecovery.SYNC_CURRENT_STATE
+        else -> null
+    }
     fun reconcileOperation(id: String): Boolean = if (forks.stopPreparing(id)) true else operations.reconcile(id)
     fun restoreRecoveryText(id: String) {
         val c = get(id) ?: return
@@ -316,19 +322,6 @@ class PiConversationService(private val project: Project) {
         persist()
         terminal().selectTab(conversation.id, requestFocus = false)
         notifyListeners(ChangeEvent(ChangeKind.SENT, conversation.id))
-        return true
-    }
-
-    fun deleteMessage(conversationId: String, index: Int): Boolean {
-        val conversation = get(conversationId) ?: return false
-        if (index !in conversation.messages.indices) return false
-        val removed = conversation.messages.removeAt(index)
-        if (removed.entryId != null && removed.sessionId != null) {
-            conversation.hiddenEntries.add(ConversationOperations.key(removed.sessionId, removed.entryId))
-        } else conversation.hiddenLegacy.add(removed)
-        conversation.viewRevision++
-        persist()
-        notifyListeners(ChangeEvent(ChangeKind.STRUCTURE, conversationId))
         return true
     }
 

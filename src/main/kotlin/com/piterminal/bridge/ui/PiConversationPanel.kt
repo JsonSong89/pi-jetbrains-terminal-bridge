@@ -23,9 +23,8 @@ import com.intellij.openapi.ui.SimpleToolWindowPanel
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.ui.JBColor
-import com.intellij.ui.JBSplitter
+import com.intellij.ui.OnePixelSplitter
 import com.intellij.ui.PopupHandler
-import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTextArea
 import com.intellij.util.ui.JBUI
@@ -46,7 +45,6 @@ import java.awt.Component
 import java.awt.Cursor
 import java.awt.Dimension
 import java.awt.FlowLayout
-import java.awt.Graphics
 import java.awt.Point
 import java.awt.event.ComponentAdapter
 import java.awt.event.ComponentEvent
@@ -71,7 +69,6 @@ import javax.swing.JScrollPane
 import javax.swing.KeyStroke
 import javax.swing.ScrollPaneConstants
 import javax.swing.SwingUtilities
-import javax.swing.Timer
 import javax.swing.ToolTipManager
 import javax.swing.event.DocumentEvent
 import javax.swing.event.DocumentListener
@@ -86,37 +83,24 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
 
     private val conversations = PiConversationService.getInstance(project)
     private val combo = ComboBox<PiConversation>()
-    private val statusLabel = JBLabel()
-    private val branchCountLabel = JBLabel().apply {
-        font = JBUI.Fonts.smallFont()
-        foreground = JBUI.CurrentTheme.ContextHelp.FOREGROUND
-        border = JBUI.Borders.empty(0, 4, 0, 8)
-        isVisible = false
-    }
+    private val statusLabel = PiPanelStyle.statusLabel()
+    private val branchCountLabel = PiPanelStyle.footerCaption().apply { isVisible = false }
     private val historyList = JPanel()
     private val historyScroll = JBScrollPane()
     private val messageRail = PiMessageRail()
-    private val historyCards = mutableListOf<JComponent>()
+    private val historyCards = mutableListOf<PiHistoryCard>()
     private val historyMessages = mutableListOf<PiUserMessage>()
 
     /** Messages the user expanded; identity-keyed because messages have no id. */
     private val expandedMessages: MutableSet<PiUserMessage> =
         Collections.newSetFromMap(IdentityHashMap<PiUserMessage, Boolean>())
     private val inputArea = JBTextArea()
-    private val sendButton = JButton("Send")
-    private val reconcileButton = JButton("Sync").apply {
-        toolTipText = "Refresh Pi state or reconcile a confirmed operation result"
-        addActionListener { conversations.active()?.let { conversations.reconcileOperation(it.id) } }
+    private val sendButton = PiPanelStyle.primaryButton("Send")
+    private val copyInputButton = PiPanelStyle.iconButton(AllIcons.Actions.Copy, "Copy input to clipboard") {
+        copyInputToClipboard()
     }
-    private val recoveryButton = JButton("Restore text").apply {
-        toolTipText = "Append the saved rewind text to your draft"
-        addActionListener { conversations.active()?.let { conversations.restoreRecoveryText(it.id) } }
-    }
-    private val copyInputButton = JButton(AllIcons.Actions.Copy).apply {
-        toolTipText = "Copy input to clipboard"
-    }
-    private val copyWorkspaceButton = JButton(AllIcons.General.OpenDisk).apply {
-        toolTipText = "Append open workspace files to input"
+    private val copyWorkspaceButton = PiPanelStyle.iconButton(AllIcons.General.OpenDisk, "Append open workspace files to input") {
+        appendOpenWorkspaceFiles()
     }
     private val timeFormat = SimpleDateFormat("HH:mm")
     private companion object {
@@ -126,14 +110,6 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
         const val LONG_TEXT_CHARS = 20_000
         const val LONG_TEXT_ROWS = 200
         const val RAIL_TOOLTIP_CHARS = 30
-        const val FLASH_MS = 300
-        const val PROP_BODY = "pi-history-text"
-        const val PROP_FLASH = "pi-history-flash"
-
-        val FLASH_BACKGROUND: java.awt.Color =
-            JBColor.namedColor("PiBridge.HistoryCard.flash", JBColor(0xE3EDFF, 0x2F3946))
-        val LINK_FOREGROUND: java.awt.Color =
-            JBColor.namedColor("Link.activeForeground", JBColor(0x2A6ED6, 0x6BA6FF))
     }
 
     /** Cache key that decides whether the history cards have to be rebuilt. */
@@ -219,6 +195,8 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
                 add(NewConversationAction())
                 add(RenameConversationAction())
                 add(DeleteConversationAction())
+                add(RecoverOperationAction())
+                add(RestoreTextAction())
                 addSeparator()
                 add(CheckTerminalAction())
                 add(FocusTerminalAction())
@@ -228,24 +206,15 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
         toolbar.targetComponent = this
 
         val top = JPanel(BorderLayout(JBUI.scale(8), 0)).apply {
-            border = JBUI.Borders.empty(6, 8, 4, 8)
+            border = PiPanelStyle.headerBarBorder
             add(combo, BorderLayout.CENTER)
             add(toolbar.component, BorderLayout.EAST)
         }
 
-        statusLabel.border = JBUI.Borders.empty(0, 8, 6, 8)
-        statusLabel.foreground = JBUI.CurrentTheme.ContextHelp.FOREGROUND
-        statusLabel.font = JBUI.Fonts.smallFont()
-
         val header = JPanel(BorderLayout()).apply {
+            border = PiPanelStyle.headerBorder
             add(top, BorderLayout.NORTH)
-            add(JPanel(BorderLayout()).apply {
-                add(statusLabel, BorderLayout.CENTER)
-                add(JPanel(FlowLayout(FlowLayout.RIGHT, 4, 0)).apply {
-                    add(recoveryButton)
-                    add(reconcileButton)
-                }, BorderLayout.EAST)
-            }, BorderLayout.SOUTH)
+            add(statusLabel, BorderLayout.SOUTH)
         }
 
         historyList.apply {
@@ -257,9 +226,9 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
             verticalScrollBarPolicy = ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED
             horizontalScrollBarPolicy = ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER
             minimumSize = Dimension(0, JBUI.scale(80))
-            // No right inset: the message rail sits right next to the scroll bar.
-            border = JBUI.Borders.empty(4, 8, 4, 0)
         }
+        // No right inset: the message rail sits right next to the scroll bar.
+        PiPanelStyle.styleHistoryScroll(historyScroll)
         historyScroll.viewport.addComponentListener(object : ComponentAdapter() {
             override fun componentResized(e: ComponentEvent) = scheduleRemeasure()
         })
@@ -328,39 +297,21 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
         installInputFileDrop()
 
         sendButton.addActionListener { sendDraft() }
-        copyInputButton.addActionListener { copyInputToClipboard() }
-        copyWorkspaceButton.addActionListener { appendOpenWorkspaceFiles() }
 
-        val buttonRow = JPanel(BorderLayout()).apply {
-            add(JPanel(FlowLayout(FlowLayout.LEFT, 4, 4)).apply {
-                add(branchCountLabel)
-                add(copyWorkspaceButton)
-            }, BorderLayout.WEST)
-            add(JPanel(FlowLayout(FlowLayout.RIGHT, 4, 4)).apply {
-                add(copyInputButton)
-                add(sendButton)
-            }, BorderLayout.EAST)
+        val inputFooter = JPanel(BorderLayout()).apply {
+            isOpaque = false
+            border = PiPanelStyle.inputFooterBorder
+            add(PiPanelStyle.row(FlowLayout.LEFT, copyWorkspaceButton, branchCountLabel), BorderLayout.WEST)
+            add(PiPanelStyle.row(FlowLayout.RIGHT, copyInputButton, sendButton), BorderLayout.EAST)
         }
+        val inputScroll = JBScrollPane(inputArea)
+        PiPanelStyle.styleInputEditor(inputArea, inputScroll)
 
         val inputPanel = JPanel(BorderLayout()).apply {
-            border = JBUI.Borders.compound(
-                JBUI.Borders.customLine(JBColor.namedColor("Separator.separatorColor", JBColor.border()), 1, 0, 0, 0),
-                JBUI.Borders.empty(10, 8, 8, 8)
-            )
+            border = PiPanelStyle.inputPanelBorder
             preferredSize = Dimension(0, JBUI.scale(350))
             minimumSize = Dimension(0, JBUI.scale(140))
-            add(JBLabel("Input").apply {
-                font = JBUI.Fonts.smallFont()
-                foreground = JBUI.CurrentTheme.ContextHelp.FOREGROUND
-                border = JBUI.Borders.emptyBottom(4)
-            }, BorderLayout.NORTH)
-            add(JBScrollPane(inputArea), BorderLayout.CENTER)
-            add(buttonRow, BorderLayout.SOUTH)
-        }
-
-        val south = JPanel(BorderLayout()).apply {
-            add(javax.swing.JSeparator(), BorderLayout.NORTH)
-            add(inputPanel, BorderLayout.CENTER)
+            add(PiInputSurface(inputArea, inputScroll, inputFooter), BorderLayout.CENTER)
         }
 
         val historyPanel = JPanel(BorderLayout()).apply {
@@ -370,9 +321,9 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
         }
         messageRail.isVisible = false
 
-        val splitter = JBSplitter(true, 0.52f).apply {
+        val splitter = OnePixelSplitter(true, 0.52f).apply {
             firstComponent = historyPanel
-            secondComponent = south
+            secondComponent = inputPanel
             setHonorComponentsMinimumSize(true)
         }
 
@@ -417,16 +368,17 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
             val alive = active != null && conversations.isTerminalAlive(active.id)
             val working = active != null && conversations.isAgentWorking(active.id)
             val currentModel = active?.let { conversations.currentModel(it.id) }
-            statusLabel.text = when {
-                active == null -> "No active conversation"
-                conversations.operationStatus(active.id) != null -> "${active.title} · ${conversations.operationStatus(active.id)}"
-                working -> "${active.title} · agent working${currentModel?.let { " · $it" } ?: ""}"
-                alive -> "${active.title} · terminal running${currentModel?.let { " · $it" } ?: ""}"
-                else -> "${active.title} · terminal closed"
+            val modelSuffix = currentModel?.let { " · $it" }.orEmpty()
+            val operationStatus = active?.let { conversations.operationStatus(it.id) }
+            when {
+                active == null -> PiPanelStyle.applyStatus(statusLabel, "No active conversation", PiStatusTone.CLOSED)
+                operationStatus != null -> PiPanelStyle.applyStatus(statusLabel, operationStatus, PiStatusTone.ATTENTION)
+                working -> PiPanelStyle.applyStatus(statusLabel, "Agent working$modelSuffix", PiStatusTone.WORKING)
+                alive -> PiPanelStyle.applyStatus(statusLabel, "Terminal running$modelSuffix", PiStatusTone.RUNNING)
+                else -> PiPanelStyle.applyStatus(statusLabel, "Terminal closed", PiStatusTone.CLOSED)
             }
             val hasActive = active != null
             sendButton.isEnabled = hasActive && !conversations.hasPendingOperation(active!!.id)
-            reconcileButton.isEnabled = hasActive
             val counts = active?.let { conversations.branchCounts(it.id) }
             if (counts == null) {
                 branchCountLabel.isVisible = false
@@ -438,7 +390,6 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
                 branchCountLabel.toolTipText =
                     "Active Pi branch · ${counts.users} user messages · ${counts.model} assistant/tool entries"
             }
-            recoveryButton.isVisible = !active?.recoveryText.isNullOrEmpty()
             copyInputButton.isEnabled = hasActive
             copyWorkspaceButton.isEnabled = hasActive
             inputArea.isEnabled = hasActive
@@ -458,9 +409,8 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
         inputArea.font = font
         var rowsDirty = false
         for (card in historyCards) {
-            val body = card.getClientProperty(PROP_BODY) as? JBTextArea ?: continue
-            if (body.font != font) {
-                body.font = font
+            if (card.body.font != font) {
+                card.body.font = font
                 rowsDirty = true
             }
         }
@@ -627,17 +577,14 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
         val messages = conversation?.messages.orEmpty()
         pruneExpandedState(messages)
         if (messages.isEmpty()) {
-            historyList.add(JBLabel("User messages will appear here").apply {
-                foreground = JBUI.CurrentTheme.ContextHelp.FOREGROUND
-                font = JBUI.Fonts.smallFont()
-                alignmentX = Component.LEFT_ALIGNMENT
-                border = JBUI.Borders.empty(8, 2)
-            })
+            historyList.add(Box.createVerticalGlue())
+            historyList.add(PiPanelStyle.emptyHint("User messages will appear here"))
+            historyList.add(Box.createVerticalGlue())
         } else {
             val conversationId = conversation!!.id
             messages.forEachIndexed { index, message ->
                 if (index > 0) {
-                    historyList.add(Box.createVerticalStrut(JBUI.scale(8)))
+                    historyList.add(Box.createVerticalStrut(JBUI.scale(PiPanelStyle.CARD_GAP)))
                 }
                 val card = historyCard(conversationId, index, message)
                 historyCards.add(card)
@@ -688,7 +635,7 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
 
     /** Width available to card body text, minus a safety margin for wrap drift. */
     private fun historyTextWidth(): Int {
-        val available = historyScroll.viewport.extentSize.width - JBUI.scale(16) - JBUI.scale(2)
+        val available = historyScroll.viewport.extentSize.width - JBUI.scale(PiPanelStyle.CARD_TEXT_INSETS) - JBUI.scale(2)
         return available.coerceAtLeast(JBUI.scale(40))
     }
 
@@ -721,10 +668,9 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
         var changed = false
         historyCards.forEachIndexed { index, card ->
             val message = historyMessages.getOrNull(index) ?: return@forEachIndexed
-            val body = card.getClientProperty(PROP_BODY) as? JBTextArea ?: return@forEachIndexed
             val rows = if (isCollapsed(message)) COLLAPSED_ROWS else expandedRows(message)
-            if (body.rows != rows) {
-                body.rows = rows
+            if (card.body.rows != rows) {
+                card.body.rows = rows
                 changed = true
             }
         }
@@ -765,7 +711,7 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
     private fun jumpToMessage(index: Int) {
         val card = historyCards.getOrNull(index) ?: return
         scrollToY(card.y)
-        flashHistoryCard(card)
+        card.flash()
         updateRail()
     }
 
@@ -775,17 +721,6 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
         val target = (current + delta).coerceIn(0, historyCards.lastIndex)
         navigationTargetIndex = target
         jumpToMessage(target)
-    }
-
-    private fun flashHistoryCard(card: JComponent) {
-        card.putClientProperty(PROP_FLASH, true)
-        card.repaint()
-        val timer = Timer(FLASH_MS) {
-            card.putClientProperty(PROP_FLASH, false)
-            card.repaint()
-        }
-        timer.isRepeats = false
-        timer.start()
     }
 
     private fun railTitle(index: Int): String? {
@@ -807,75 +742,29 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
         bind(KeyStroke.getKeyStroke(KeyEvent.VK_DOWN, InputEvent.ALT_DOWN_MASK), 1)
     }
 
-    private fun historyCard(conversationId: String, index: Int, message: PiUserMessage): JComponent {
-        val time = JBLabel(timeFormat.format(Date(message.timestamp))).apply {
-            font = JBUI.Fonts.smallFont()
-            foreground = JBUI.CurrentTheme.ContextHelp.FOREGROUND
-        }
+    private fun historyCard(conversationId: String, index: Int, message: PiUserMessage): PiHistoryCard {
+        val time = PiPanelStyle.secondaryLabel(timeFormat.format(Date(message.timestamp)))
         val body = HistoryTextArea(message.text).apply {
             isEditable = false
             isOpaque = false
             lineWrap = true
             wrapStyleWord = true
             font = PiSettings.getInstance().conversationFont()
-            border = JBUI.Borders.empty(4, 0, 2, 0)
+            border = PiPanelStyle.cardBodyBorder
         }
-        val rewind = iconButton(AllIcons.Actions.Undo, "Rewind conversation to this message") {
+        val rewind = PiPanelStyle.iconButton(AllIcons.Actions.Undo, "Rewind conversation to this message") {
             conversations.rewindConversation(conversationId, index)
         }
-        val fork = iconButton(AllIcons.Vcs.Branch, "Fork conversation at this message") {
+        val fork = PiPanelStyle.iconButton(AllIcons.Vcs.Branch, "Fork conversation at this message") {
             conversations.forkConversation(conversationId, index)
         }
-        val copy = iconButton(AllIcons.Actions.Copy, "Copy") {
+        val copy = PiPanelStyle.iconButton(AllIcons.Actions.Copy, "Copy") {
             CopyPasteManager.getInstance().setContents(StringSelection(message.text))
-        }
-        val delete = iconButton(AllIcons.General.Delete, "Remove this card from the panel (does not touch the Pi session)") {
-            conversations.deleteMessage(conversationId, index)
-        }
-        val actions = JPanel(FlowLayout(FlowLayout.RIGHT, JBUI.scale(4), 0)).apply {
-            isOpaque = false
-            add(rewind)
-            add(fork)
-            add(copy)
-            add(delete)
         }
         val collapsed = isCollapsed(message)
         body.rows = if (collapsed) COLLAPSED_ROWS else expandedRows(message)
-        val bottom = JPanel(BorderLayout()).apply {
-            isOpaque = false
-            add(JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
-                isOpaque = false
-                if (message.text.length > COLLAPSE_CHARS) {
-                    add(expandLink(index, message, collapsed))
-                }
-            }, BorderLayout.WEST)
-            add(actions, BorderLayout.EAST)
-        }
-        return object : JPanel(BorderLayout()) {
-            init {
-                putClientProperty(PROP_BODY, body)
-                alignmentX = Component.LEFT_ALIGNMENT
-                isOpaque = true
-                background = JBColor.namedColor("ToolWindow.background", JBColor(0xF2F2F2, 0x3C3F41))
-                border = JBUI.Borders.compound(
-                    JBUI.Borders.customLine(JBColor.namedColor("Separator.separatorColor", JBColor.border()), 1),
-                    JBUI.Borders.empty(6, 8, 2, 6)
-                )
-                add(time, BorderLayout.NORTH)
-                add(body, BorderLayout.CENTER)
-                add(bottom, BorderLayout.SOUTH)
-            }
-
-            override fun getMaximumSize(): Dimension = Dimension(Int.MAX_VALUE, preferredSize.height)
-
-            override fun paintComponent(g: Graphics) {
-                super.paintComponent(g)
-                if (getClientProperty(PROP_FLASH) == true) {
-                    g.color = FLASH_BACKGROUND
-                    g.fillRect(0, 0, width, height)
-                }
-            }
-        }
+        val expand = if (message.text.length > COLLAPSE_CHARS) expandLink(index, message, collapsed) else null
+        return PiHistoryCard(body, time, PiPanelStyle.row(FlowLayout.RIGHT, rewind, fork, copy), expand)
     }
 
     /** Text-styled toggle: the card body itself stays a selectable text area. */
@@ -888,47 +777,8 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
             longContent -> "Content too long · Collapse"
             else -> "Collapse"
         }
-        return JButton(label).apply {
-            isBorderPainted = false
-            isContentAreaFilled = false
-            isOpaque = false
-            isFocusable = false
-            cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
-            margin = JBUI.emptyInsets()
-            font = JBUI.Fonts.smallFont()
-            foreground = LINK_FOREGROUND
-            toolTipText = if (collapsed) "Show the whole message" else "Collapse the message"
-            border = JBUI.Borders.empty(0, 0, 0, JBUI.scale(4))
-            addActionListener { toggleExpanded(index, message) }
-        }
-    }
-
-    private fun iconButton(icon: javax.swing.Icon, tip: String, onClick: () -> Unit): JButton {
-        return JButton(icon).apply {
-            toolTipText = tip
-            isBorderPainted = false
-            isContentAreaFilled = false
-            isOpaque = false
-            isFocusable = false
-            margin = JBUI.emptyInsets()
-            preferredSize = Dimension(JBUI.scale(18), JBUI.scale(18))
-            addMouseListener(object : MouseAdapter() {
-                override fun mouseEntered(e: MouseEvent) {
-                    isOpaque = true
-                    isContentAreaFilled = true
-                    background = JBUI.CurrentTheme.ActionButton.hoverBackground()
-                    repaint()
-                }
-
-                override fun mouseExited(e: MouseEvent) {
-                    isOpaque = false
-                    isContentAreaFilled = false
-                    background = null
-                    repaint()
-                }
-            })
-            addActionListener { onClick() }
-        }
+        val tip = if (collapsed) "Show the whole message" else "Collapse the message"
+        return PiPanelStyle.linkButton(label, tip) { toggleExpanded(index, message) }
     }
 
     private fun persistDraft() {
@@ -1279,6 +1129,42 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
             border = JBUI.Borders.empty(2, 6, 2, 6 + comboPopupScrollBarInset(list))
             return this
         }
+    }
+
+    private inner class RecoverOperationAction : AnAction(
+        "Sync current session", "Adopt the confirmed Pi state without repeating the operation", AllIcons.Actions.Refresh
+    ), DumbAware {
+        override fun actionPerformed(e: AnActionEvent) {
+            persistDraft()
+            conversations.active()?.let { conversations.reconcileOperation(it.id) }
+        }
+
+        override fun update(e: AnActionEvent) {
+            val action = conversations.active()?.let { conversations.operationRecovery(it.id) }
+            val preparing = action == PiConversationService.OperationRecovery.STOP_PREPARATION
+            e.presentation.isEnabledAndVisible = action != null
+            e.presentation.text = if (preparing) "Stop fork preparation" else "Sync current session"
+            e.presentation.description = if (preparing) "Stop preparing the fork and keep the copy" else
+                "Adopt the confirmed Pi state without repeating the operation"
+            e.presentation.icon = if (preparing) AllIcons.General.Remove else AllIcons.Actions.Refresh
+        }
+
+        override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.EDT
+    }
+
+    private inner class RestoreTextAction : AnAction(
+        "Restore text", "Append the saved rewind text to your draft", AllIcons.Actions.Undo
+    ), DumbAware {
+        override fun actionPerformed(e: AnActionEvent) {
+            persistDraft()
+            conversations.active()?.let { conversations.restoreRecoveryText(it.id) }
+        }
+
+        override fun update(e: AnActionEvent) {
+            e.presentation.isEnabledAndVisible = !conversations.active()?.recoveryText.isNullOrEmpty()
+        }
+
+        override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.EDT
     }
 
     private inner class NewConversationAction : AnAction("New Conversation", "Start a new Pi conversation", AllIcons.General.Add), DumbAware {
