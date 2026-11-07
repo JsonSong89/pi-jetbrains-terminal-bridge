@@ -80,7 +80,7 @@ Pi 标签页是**真实终端里跑着完整的 pi TUI** —— 所有斜杠命�
 通过公开 API 在该轮最后一个 entry 分叉，包含工具调用、工具结果和最终回复。
 新会话经耐久 handoff 确认完整分支后，面板才裁剪；中间副本不会归档成额外会话。
 
-Fork 会拒绝忙碌会话、有歧义的旧卡片、带 label 的会话，以及目标 TUI 输入框已有内容的情况。
+Fork 会拒绝忙碌会话、不在当前原生分支上的缓存消息、带 label 的会话，以及目标 TUI 输入框已有内容的情况。
 源 Terminal 和 IDEA 草稿保留。准备期间可点顶部 **Stop fork preparation** 图标停止并保留全量副本；请求提交后，
 断联只查询原操作 ID，不重复拉起 Terminal 或再次 fork。失败或未知时保留副本供检查。
 
@@ -96,10 +96,9 @@ pi 忙碌、首条消息无 parent，或 parent 是另一条 user/custom message
 输入框左下角的 Workspace 使用无边框小图标。未知期间可以查看、复制和编辑草稿，
 同一会话的冲突修改会被锁住。
 
-卡片使用原生 session/entry id 绑定；卡片右下角常驻 Rewind、Fork、Copy；通过 Rewind 调整活跃历史。
-旧隐藏记录继续兼容，避免以前隐藏的卡片重新出现。
-有歧义的旧卡片保留且禁用回退。首次迁移保留原面板可见性，因此迁移前仅在 TUI 输入的历史
-也可能继续在面板隐藏；初始化后的新 TUI 用户消息会正常显示。
+历史卡片直接来自 pi 当前原生分支，保留原生 session/entry id 和分支顺序；右下角常驻 Rewind、Fork、Copy。插件不再用本地发送文本匹配历史。发送后，只有 pi 实际记录了 user entry 才显示卡片；`/model` 不产生卡片，skill/模板显示 pi 保存的展开文本。
+
+第一份有效快照整体替换旧本地卡片，旧隐藏记录不再过滤历史，因此当前分支中以前隐藏的消息也会重新显示；草稿保留。未连接时保存的消息仅作离线缓存，Rewind/Fork 需要有效在线快照。session 解析和分支遍历由 pi 公开 SessionManager API 完成，经现有 bridge 提供给面板。
 
 验证入口：`node --test tests/bridge-extension.test.mjs`、Gradle `test`，以及显式运行的
 `PI_BINARY=/path/to/pi python3 tests/bridge-tui-smoke.py`（真实 pi 1.5.0 PTY smoke，覆盖 rewind 与 fork 的运行时替换）。

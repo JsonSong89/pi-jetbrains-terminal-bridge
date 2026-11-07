@@ -90,7 +90,7 @@ then does the panel trim its copy. The intermediate copy is not archived.
 This panel action deliberately differs from native `/fork`'s default edit-before
 behavior.
 
-Fork rejects busy sessions, ambiguous old cards, labelled sessions and a target
+Fork rejects busy sessions, messages absent from the current native branch, labelled sessions and a target
 TUI editor containing input. Your source Terminal and IDEA draft stay intact.
 During preparation, the toolbar's **Stop fork preparation** icon can stop the
 workflow and keep the full copy. After
@@ -115,13 +115,9 @@ it never repeats the operation. **Restore text** is also a conditional toolbar
 icon. Hover over an icon to see its action. The lower-left workspace-files action
 uses a compact icon button.
 
-Cards are bound to native session/entry ids. Rewind, Fork and Copy sit at the
-card's lower right.
-Use Rewind to adjust the active history. Existing hidden records remain compatible.
-Ambiguous old cards stay
-unbound and cannot be rewound. The first migration preserves the old panel's
-visibility; older messages that were only in the TUI may stay hidden in the
-panel, while new TUI messages appear after initialization.
+History cards come directly from Pi's current native branch, with original session/entry ids and branch order. Rewind, Fork and Copy sit at the card's lower right. The panel no longer matches locally sent text to session messages. A send appears in history only after Pi records a user entry; `/model` creates no card, while skills/templates show their recorded expanded text.
+
+The first valid snapshot replaces old local cards and ignores obsolete hidden records, so previously hidden messages on the current branch become visible again. Drafts are preserved. Before connection, saved messages are an offline cache; Rewind/Fork require a verified online snapshot. Session parsing and branch traversal stay in Pi's public SessionManager API, exposed through the existing bridge.
 
 Validation entry points: `node --test tests/bridge-extension.test.mjs`, Gradle
 `test`, and the opt-in real TUI smoke

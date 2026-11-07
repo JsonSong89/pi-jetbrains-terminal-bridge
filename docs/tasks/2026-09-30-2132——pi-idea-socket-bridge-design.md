@@ -18,7 +18,7 @@ PiConversationPanel
 ```
 
 - pi 决定会话身份、持久化树、当前分支及运行状态。
-- IDEA 决定标题、草稿、卡片隐藏记录和本地业务提交；完整快照不覆盖这些数据。
+- IDEA 决定标题、草稿和本地业务提交；消息列表只是原生分支缓存，完整快照整体替换。
 - 面板显示用户消息；传输保留原生 AI/tool/其他 entries，不能将它宣称为精确模型 prompt。
 - 网络超时表示观察未知，不能改写远端执行状态，也不能自动重放修改请求。
 
@@ -33,7 +33,7 @@ PiConversationPanel
 | `OperationStore` | 本地请求与业务 checkpoint 原子写入、容量保护 |
 | `ConversationOperations` | rewind 意图、业务提交、草稿保护、显式对账 |
 | `ForkWorkflow` / `ForkPolicy` | 独立 Terminal 准备、原生 turn / 副本身份核验、结果提交策略 |
-| `ConversationProjection` / `ConversationCommitPolicy` | 无 IDE 依赖的历史迁移、隐藏记录和提交前置条件 |
+| `ConversationProjection` / `ConversationCommitPolicy` | 无 IDE 依赖的原生历史投影和提交前置条件 |
 | extension `Transport` | JSONL 长连接、重连与背压，无请求重放队列 |
 | extension `OperationRuntime` | descriptor registry、intent/终态、去重、查询、handoff 协调 |
 | extension `PiAdapter` | 无副作用 probe、内部命令派发、快照、公开 API 和 rewind 后置核验 |
@@ -54,27 +54,21 @@ extension 在 `session_start` 之后派发唯一内部命令完成 probe，再�
 - 网络解析与日志在后台；IDE reader 等待后台消费，快照/UI 通知合并，避免 EDT 队列无限堆积。
 - 同时出现第二个活动 runtime 不直接接管；旧 socket 关闭后可重连。未知操作仍保留原请求身份与锁。
 
-v1 短连接事件暂保留，用于 working/idle、模型、写文件通知。按 `(tabKey,type)` 的 seq 去重；每个事件短暂失败时重试一次。v2 接管过的 tab，即使断联，旧 v1 `session_changed/stopped` 也不能抢先换绑或归档。
+v1 短连接事件暂保留，用于 working/idle、模型、写文件通知。按 `(tabKey,type)` 的 seq 去重；每个事件短暂失败时重试一次。状态类事件（`agent_state`、`model_changed`、`session_changed`、`session_stopped`）在 EDT 上只处理同类型最新一条；`file_modified` 每条对应不同路径，必须逐条处理，不能被后来的 seq 覆盖。v2 接管过的 tab，即使断联，旧 v1 `session_changed/stopped` 也不能抢先换绑或归档。
 
 v2 快照是该 tab 会话绑定与分支投影的单一入口。agent 完成通知另用 v1 状态转换记录，避免快照同步吞掉 error/abort 通知。
 
 ## 4. 快照和本地卡片
 
-`SessionSnapshot` 包含公开 session header/file/id、完整活跃分支的原生 entries、leaf、idle/model/pending 状态、采集时间及 source。采集前后对拍；snapshotId 覆盖 runtimeId、事件代数和完整原生内容，不只是 leaf。adapter 只缓存最多 16 个观察凭据。
+`SessionSnapshot` 包含公开 session header/file/id、完整活跃分支的原生 entries、leaf、idle/model/pending 状态、采集时间及 source。分支校验只要求 `user`/`assistant`/`toolResult` 角色带 `content`；其他角色（如 `!cmd` 写入的 `bashExecution`、`custom`、`branchSummary`、`compactionSummary`）没有 `content`，只校验 `role`。采集前后对拍；snapshotId 覆盖 runtimeId、事件代数和完整原生内容，不只是 leaf。adapter 只缓存最多 16 个观察凭据。
 
 完整稳定快照才可驱动历史更新；首连、重连、树变化、消息结束（合并）、模型变化、操作终态与主动查询都可同步。心跳不携带历史。
 
-`PiUserMessage` 增加 `sessionId/entryId`；`PiConversation` 增加：
+历史卡片必须由 pi 的完整、稳定的当前活跃分支快照直接生成，每张卡携带原生 `(sessionId, entryId)`；禁止按文本、时间戳、顺序或 slash 命令展开结果推断身份。extension 使用公开 `ctx.sessionManager.getBranch()/getSessionId()/getSessionFile()/getLeafId()`，经现有 `session.snapshot/1` 和快照事件提供数据；IDEA 不实现 jsonl 会话树解析，也不新增 WS 服务。保留分支顺序，不按时间戳重排；重复文本仍是不同 entry。
 
-- `draftRevision` / `viewRevision`；
-- `hiddenEntries`（`sessionId:entryId`）与 `hiddenLegacy`；
-- `recoveryText`、`appliedOperations`、`projectionInitialized`。
+面板发送不创建历史卡片，也不做 pending 匹配或文本规范化匹配；命令没有产生原生 user entry 就不显示。第一份完整有效快照替换旧卡片，旧隐藏记录失效；旧 session 卡片不会混入当前历史。消息保留原生顺序和文本，时间戳仅用于显示。空分支会清空历史；不完整、变化中或其他 session 的快照不能覆盖缓存。
 
-历史卡片只提供 Rewind / Fork / Copy；删除入口与 deleteMessage 服务方法已移除。旧本地隐藏记录继续兼容，不恢复已隐藏卡片。旧卡片按文本和顺序的唯一映射绑定，已有 entry 身份作为顺序锚点；歧义保留并提示，不能按 newest-first 猜。
-
-旧 XML 没有保存删除记录。首次 v2 迁移保留原面板可见性，把既未映射、又不属于歧义文本的旧原生用户条目标为本地隐藏；因此迁移前仅在 TUI 输入的历史也可能保持不显示，仍可在 TUI 查看。初始化后的新原生用户消息正常进入投影。这是保护旧删除操作的保守取舍。
-
-草稿、隐藏集合和本地幂等标记仍写入 project XML；操作的业务 checkpoint 与幂等标记还会一起原子写入独立日志，弥补平台 XML 延迟落盘窗口。恢复不覆盖 revision 更高的新草稿/视图。
+本地 XML 消息仅作离线缓存；无在线有效快照不能执行 Rewind/Fork。草稿、recoveryText、revision 和幂等标记继续保存。checkpoint 只恢复草稿/恢复文本/幂等信息，不能覆盖在线历史。未决操作仍冻结视图，不能用当前快照推断原操作成功；结果核验或显式对账后采用原生分支。
 
 ## 5. Rewind
 
@@ -100,7 +94,7 @@ accepted/running 都不是成功。超时或断联只更新观察状态，并每
 - 原 executor 返回后写入的 `.ended` 证据（绑定 id/digest/runtime）；
 - 原进程已确认不存在。PID 重用时保守地保留未知。
 
-新 hello、runtimeId 改变或释放 writer lease 本身都不足以证明旧异步执行结束；同进程 reload 可能还在展开旧命令。handoff 未完成也不能以对账抢走所有权。结果和当前分支不同、隐藏卡片变化等进入本地 conflict，由用户显式对账。对账本身的结果未知时同样只查询；后续显式对账可覆盖多个已经确认结束的请求记录。
+新 hello、runtimeId 改变或释放 writer lease 本身都不足以证明旧异步执行结束；同进程 reload 可能还在展开旧命令。handoff 未完成也不能以对账抢走所有权。结果和当前分支不同、视图变化等进入本地 conflict，由用户显式对账。对账本身的结果未知时同样只查询；后续显式对账可覆盖多个已经确认结束的请求记录。
 
 ## 7. 持久化与交接
 
@@ -131,14 +125,14 @@ ForkWorkflow 已使用通用交接：只捕获 ticket 配置和原生核验证�
 ## 8. ForkWorkflow
 
 1. 源 tab 必须具备 fork capability、完整稳定快照、准确 user entryId，且没有未决操作或忙碌。
-2. 新目标继承完整源卡片视图和隐藏状态，草稿为空；没有提前 subList 裁剪。
+2. 新目标暂用源原生卡片缓存，草稿为空，不继承隐藏状态；没有提前 subList 裁剪。
 3. 在普通操作日志中先保存 `preparing` reservation（还没有 request），内容包括目标身份/初始视图、源原生文件路径、目标 entryId 与完整 turn branch。
 4. 耐久发布后只启动一次目标 Terminal：`--fork <原生文件完整路径> --session-id <目标id>`。等待快照/能力事件，不用延迟或轮询 session id。准备期点击顶部 Stop fork preparation 图标可停止并保留副本；点击/恢复不会另起目标进程。
 5. 目标快照核对原生 turn entries 前缀与源完全一致；只允许其后附带启动 session_info/model/thinking 元数据。复制身份变化、内容变化、busy 或不支持 capability 时不发修改请求。
 6. 同一 reservation id 一次性转成 `conversation.forkAtTurn/1`，参数 `{targetEntryId,turnLeafId}`，复用耐久 intent / 结果 / query。
 7. PiAdapter 在新鲜命令上下文重新核对观察/截止时间/完整 turn leaf。目标必须持久、无 label、TUI editor 为空；公开 API 的 label 重建与 callback 后清空 editor 行为决定这些前置限制。
 8. durable handoff 后调 `ctx.fork(leaf,{position:"at",withSession})`，新 ctx 验证新 session/file、parentSession、完整 branch 和空 editor，记录终态。新 hello 本身不释放锁。
-9. IDEA 取得耐久成功结果及兼容当前快照后，重绑卡片/隐藏身份，投影确认分支；只更新目标，不归档中间全量副本。等待时编辑的新草稿保持原样。
+9. IDEA 取得耐久成功结果及兼容当前快照后，采用新 session 身份，直接投影确认分支；只更新目标，不归档中间全量副本。等待时编辑的新草稿保持原样。
 10. 已发送或可能已发送只查询原 id。IDE 重开后的未发送 preparation 标为 not_sent，不重新启动或执行；缺 XML 的未决目标可由操作记录重建。checkpoint 支持在 XML 尚未持久化时恢复已确认替换身份与视图。
 
 旧 `/bridge-fork` handler、base64/文本回退定位、固定 3s 启动延迟、1.5s/6 次结果轮询、forkingIds/session_changed 特判全部删除。过期命令只有 input 拦截，不会进入模型。失败或未知保留全量副本/当前树供用户检查；带 label 的会话需后续适配。
@@ -160,7 +154,7 @@ ForkWorkflow 已使用通用交接：只捕获 ticket 配置和原生核验证�
 ## 10. 验证入口与未决项
 
 - `node --test tests/bridge-extension.test.mjs`：执行打包资源，覆盖 registry、快照、busy/取消/歧义、重复 ID、日志/断联/重启、执行结束证据、handoff、背压/framing 和保留的 v1 行为。
-- `./gradlew test`：JVM framing、原生快照、隐藏/迁移、草稿/视图提交前置条件，以及完整 turn / 副本身份 / fork 提交策略。
+- `./gradlew test`：JVM framing、原生快照、旧缓存替换、草稿/视图提交前置条件，以及完整 turn / 副本身份 / fork 提交策略。
 - `PI_BINARY=/path/to/pi python3 tests/bridge-tui-smoke.py`：隔离目录和配置，用 PTY 启动真实 pi 1.5.0，核验 probe、rewind、CLI 副本内 fork / 新实例交接、TUI 编辑器及零 prompt/model 事件。只操作临时 fixture，不使用 RPC。
 - GitHub CI 默认执行 Node 契约测试与 `test buildPlugin`；workflow_dispatch 可勾选 `tui_smoke` 安装固定 pi 版本执行真实 TUI smoke。手动 dev 构建不发布。
 

@@ -25,7 +25,7 @@ class BridgeContractTest {
             "state" to mapOf("idle" to true), "source" to mapOf("runtimeId" to "runtime", "piVersion" to "1.5.0")
         )).asJsonObject)
     }
-    private fun conversation(vararg messages: PiUserMessage) = PiConversation("tab", "Pi", "Pi", "session", messages = messages.toMutableList(), projectionInitialized = true)
+    private fun conversation(vararg messages: PiUserMessage) = PiConversation("tab", "Pi", "Pi", "session", messages = messages.toMutableList())
 
     @Test fun `LF framing preserves Unicode separators and enforces budget before allocation`() {
         val input = ByteArrayInputStream("{\"text\":\"你好\u2028\u2029\"}\r\n{\"next\":true}\n".toByteArray())
@@ -37,13 +37,13 @@ class BridgeContractTest {
     }
     @Test fun `incomplete or inconsistent snapshots cannot delete history`() {
         val c = conversation(PiUserMessage("keep"))
-        assertFalse(ConversationProjection.apply(c, snapshot(complete = false)).changed)
+        assertFalse(ConversationProjection.apply(c, snapshot(complete = false)))
         val broken = snapshot("other")
         broken.raw.getAsJsonObject("branch").addProperty("leafId", "missing")
-        assertFalse(ConversationProjection.apply(c, broken).changed)
+        assertFalse(ConversationProjection.apply(c, broken))
         val malformed = snapshot("other")
         malformed.raw.addProperty("state", "invalid state")
-        assertFalse(ConversationProjection.apply(c, malformed).changed)
+        assertFalse(ConversationProjection.apply(c, malformed))
         assertEquals(listOf("keep"), c.messages.map { it.text })
     }
     @Test fun `native unknown fields survive codec and text projection`() {
@@ -59,45 +59,37 @@ class BridgeContractTest {
         assertEquals("u0", c.messages.single().entryId)
         assertEquals("session", c.messages.single().sessionId)
     }
-    @Test fun `unique ordered migration binds duplicate text only when the whole sequence proves identity`() {
-        val c = conversation(PiUserMessage("repeat", 1), PiUserMessage("repeat", 2))
-        assertFalse(ConversationProjection.apply(c, snapshot("repeat", "repeat")).ambiguous)
-        assertEquals(listOf("u0", "u1"), c.messages.map { it.entryId })
-        val ambiguous = conversation(PiUserMessage("repeat", 1))
-        assertTrue(ConversationProjection.apply(ambiguous, snapshot("repeat", "repeat")).ambiguous)
-        assertEquals(1, ambiguous.messages.size)
-        assertNull(ambiguous.messages.single().entryId)
+    @Test fun `native branch replaces stale legacy and duplicate local cards`() {
+        val c = conversation(PiUserMessage("stale from parent", 1), PiUserMessage("repeat", 2),
+            PiUserMessage("repeat", 3), PiUserMessage("/model x", 4))
+        assertTrue(ConversationProjection.apply(c, snapshot("repeat", "repeat", "only in tui")))
+        assertEquals(listOf("repeat", "repeat", "only in tui"), c.messages.map { it.text })
+        assertEquals(listOf("u0", "u1", "u2"), c.messages.map { it.entryId })
+        assertTrue(c.messages.all { it.sessionId == "session" })
+        val revision = c.viewRevision
+        assertFalse(ConversationProjection.apply(c, snapshot("repeat", "repeat", "only in tui")))
+        assertEquals(revision, c.viewRevision)
     }
-    @Test fun `confirmed anchors prevent mapping an older legacy card to a later prompt`() {
-        val c = conversation(PiUserMessage("later", 1), PiUserMessage("anchor", 2, "session", "u0"))
-        assertTrue(ConversationProjection.apply(c, snapshot("anchor", "later")).ambiguous)
-        assertNull(c.messages.first { it.text == "later" }.entryId)
-        assertEquals("u0", c.messages.first { it.text == "anchor" }.entryId)
+    @Test fun `old hidden and pending metadata cannot suppress or add native history`() {
+        val legacy = BridgeProtocol.gson.toJsonTree(conversation(PiUserMessage("/model x", 1))).asJsonObject
+        legacy.add("hiddenEntries", BridgeProtocol.gson.toJsonTree(listOf("session:u0")))
+        legacy.add("hiddenLegacy", BridgeProtocol.gson.toJsonTree(listOf(PiUserMessage("native", 1))))
+        legacy.addProperty("projectionInitialized", true)
+        legacy.getAsJsonArray("messages")[0].asJsonObject.addProperty("pending", true)
+        val restored = BridgeProtocol.gson.fromJson(legacy, PiConversation::class.java)
+        assertTrue(ConversationProjection.apply(restored, snapshot("native")))
+        assertEquals(listOf(PiUserMessage("native", 1, "session", "u0")), restored.messages)
     }
-    @Test fun `first legacy migration preserves removed cards while later TUI messages appear`() {
-        val c = conversation(PiUserMessage("one", 1))
-        c.projectionInitialized = false
-        ConversationProjection.apply(c, snapshot("one", "old removed card"))
-        assertEquals(listOf("one"), c.messages.map { it.text })
-        assertTrue("session:u1" in c.hiddenEntries)
-        ConversationProjection.apply(c, snapshot("one", "old removed card", "new TUI prompt"))
-        assertEquals(listOf("one", "new TUI prompt"), c.messages.map { it.text })
+    @Test fun `empty native branch clears history but other session cannot replace it`() {
+        val c = conversation(PiUserMessage("keep", 1))
+        val other = snapshot("other")
+        other.raw.getAsJsonObject("session").addProperty("id", "another-session")
+        assertFalse(ConversationProjection.apply(c, other))
+        assertEquals("keep", c.messages.single().text)
+        assertTrue(ConversationProjection.apply(c, snapshot()))
+        assertTrue(c.messages.isEmpty())
     }
 
-    @Test fun `hidden native and legacy cards do not resurrect on refresh`() {
-        val c = conversation(PiUserMessage("one", 1, "session", "u0"))
-        c.hiddenEntries.add(ConversationProjection.key("session", "u1"))
-        ConversationProjection.apply(c, snapshot("one", "two"))
-        assertEquals(listOf("one"), c.messages.map { it.text })
-        val old = conversation()
-        old.hiddenLegacy.add(PiUserMessage("hidden", 1))
-        assertTrue(ConversationProjection.apply(old, snapshot("hidden")).changed)
-        assertTrue(old.messages.isEmpty())
-        assertTrue(old.hiddenLegacy.isEmpty())
-        assertTrue("session:u0" in old.hiddenEntries)
-        ConversationProjection.apply(old, snapshot("hidden"))
-        assertTrue(old.messages.isEmpty())
-    }
     @Test fun `accepted timeouts and current state resembling success cannot commit an operation`() {
         val after = snapshot("one")
         val response = BridgeProtocol.frame("response").apply { addProperty("status", "accepted") }
@@ -132,13 +124,38 @@ class BridgeContractTest {
         assertEquals(SessionSnapshot.BranchCounts(1, 0), snapshot("one").counts())
     }
 
+    private fun timed(vararg prompts: Pair<String, Long>, extra: List<Map<String, Any?>> = emptyList()): SessionSnapshot {
+        val entries = prompts.mapIndexed { i, (text, ts) -> mapOf<String, Any?>("id" to "u$i", "type" to "message",
+            "message" to mapOf("role" to "user", "content" to text, "timestamp" to ts)) } + extra
+        val chained = entries.mapIndexed { i, e -> e + ("parentId" to entries.getOrNull(i - 1)?.get("id")) }
+        return SessionSnapshot(BridgeProtocol.gson.toJsonTree(mapOf(
+            "snapshotId" to "snapshot", "capturedAt" to "diagnostic", "complete" to true, "consistency" to "stable",
+            "session" to mapOf("id" to "session"), "branch" to mapOf("leafId" to chained.lastOrNull()?.get("id"), "entries" to chained),
+            "state" to mapOf("idle" to true), "source" to mapOf("runtimeId" to "runtime", "piVersion" to "1.5.0")
+        )).asJsonObject)
+    }
+    @Test fun `bash execution messages without content keep the snapshot usable`() {
+        val bash = mapOf<String, Any?>("id" to "bash", "type" to "message", "message" to mapOf("role" to "bashExecution",
+            "command" to "ls", "output" to "", "exitCode" to 0, "cancelled" to false, "truncated" to false, "timestamp" to 2))
+        assertTrue(timed("one" to 1L, extra = listOf(bash)).usable)
+        val broken = mapOf<String, Any?>("id" to "a", "type" to "message", "message" to mapOf("role" to "assistant"))
+        assertFalse(timed("one" to 1L, extra = listOf(broken)).usable)
+    }
+    @Test fun `native text and branch order override local text and timestamps`() {
+        val c = conversation(PiUserMessage("a\tb\rc", 1), PiUserMessage("/skill:review", 2))
+        val expanded = "<skill name=\"review\">body</skill>"
+        assertTrue(ConversationProjection.apply(c, timed("a    b\nc" to 90L, expanded to 10L)))
+        assertEquals(listOf("a    b\nc", expanded), c.messages.map { it.text })
+        assertEquals(listOf("u0", "u1"), c.messages.map { it.entryId })
+        assertEquals(listOf(90L, 10L), c.messages.map { it.timestamp })
+    }
+
     @Test fun `projection preserves draft and restores no off-branch bound messages`() {
         val old = PiUserMessage("one", 1, "session", "u0")
         val c = conversation(old, PiUserMessage("two", 2, "session", "u1"))
         c.draft = "new input"; c.draftRevision = 4
         ConversationProjection.apply(c, snapshot("one"))
         assertEquals(listOf(old), c.messages)
-        assertTrue(c.messages.single() === old)
         assertEquals("new input", c.draft); assertEquals(4L, c.draftRevision)
     }
 }

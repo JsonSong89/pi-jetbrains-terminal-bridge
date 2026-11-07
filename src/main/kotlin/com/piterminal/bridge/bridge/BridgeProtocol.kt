@@ -67,7 +67,9 @@ data class SessionSnapshot(val raw: JsonObject) {
                 !seen.add(entryId) || BridgeProtocol.string(e, "parentId") != parent) return false
             if (BridgeProtocol.string(e, "type") == "message") {
                 val message = e.getAsJsonObject("message") ?: return false
-                if (BridgeProtocol.string(message, "role").isNullOrBlank() || !message.has("content")) return false
+                val role = BridgeProtocol.string(message, "role")
+                // Only LLM roles carry content; bashExecution/custom/summary messages use other fields.
+                if (role.isNullOrBlank() || role in contentRoles && !message.has("content")) return false
             }
             parent = entryId
         }
@@ -80,6 +82,7 @@ data class SessionSnapshot(val raw: JsonObject) {
         raw.get("state") == other.raw.get("state")
 
     data class UserEntry(val id: String, val text: String, val timestamp: Long)
+    private companion object { val contentRoles = setOf("user", "assistant", "toolResult") }
     fun users(): List<UserEntry> = entries.mapNotNull { element ->
         val e = element.asJsonObject
         if (BridgeProtocol.string(e, "type") != "message") return@mapNotNull null

@@ -17,11 +17,8 @@ class PiConversation(
     var draft: String = "",
     var draftRevision: Long = 0,
     var viewRevision: Long = 0,
-    val hiddenEntries: MutableSet<String> = mutableSetOf(),
-    val hiddenLegacy: MutableList<PiUserMessage> = mutableListOf(),
     var recoveryText: String = "",
-    val appliedOperations: MutableSet<String> = mutableSetOf(),
-    var projectionInitialized: Boolean = false
+    val appliedOperations: MutableSet<String> = mutableSetOf()
 ) {
     override fun equals(other: Any?): Boolean = other is PiConversation && other.id == id
     override fun hashCode(): Int = id.hashCode()

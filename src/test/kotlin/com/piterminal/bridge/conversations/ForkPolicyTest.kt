@@ -71,11 +71,11 @@ class ForkPolicyTest {
         assertTrue(ForkPolicy.mayCommit(result, "copy", branch, after, after, 3, 3))
         val target = PiConversation("tab", "fork", "Pi", "copy", messages = mutableListOf(
             PiUserMessage("repeat", 1, "copy", "u1"), PiUserMessage("repeat", 2, "copy", "u2"), PiUserMessage("later", 3, "copy", "u3")),
-            draft = "typed while waiting", draftRevision = 7, hiddenEntries = mutableSetOf("copy:u1"), projectionInitialized = true)
+            draft = "typed while waiting", draftRevision = 7)
         ForkPolicy.rebind(target, after.sessionId)
         ConversationProjection.apply(target, after)
-        assertEquals(listOf("u2"), target.messages.map { it.entryId })
-        assertTrue("replacement:u1" in target.hiddenEntries)
+        assertEquals(listOf("u1", "u2"), target.messages.map { it.entryId })
+        assertTrue(target.messages.all { it.sessionId == "replacement" })
         assertEquals("typed while waiting", target.draft)
         assertEquals(7L, target.draftRevision)
         assertEquals("copy", before.sessionId)

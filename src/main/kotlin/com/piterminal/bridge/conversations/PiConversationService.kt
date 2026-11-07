@@ -185,11 +185,7 @@ class PiConversationService(private val project: Project) {
         return PiConversation(
             id = UUID.randomUUID().toString(), title = uniqueForkTitle(source.title), tabName = source.tabName,
             piSessionId = sessionId,
-            messages = source.messages.map { if (it.sessionId == source.piSessionId) it.copy(sessionId = sessionId) else it }.toMutableList(),
-            hiddenEntries = source.hiddenEntries.map { key ->
-                if (key.startsWith("${source.piSessionId}:")) "$sessionId:${key.removePrefix("${source.piSessionId}:")}" else key
-            }.toMutableSet(),
-            hiddenLegacy = source.hiddenLegacy.toMutableList(), projectionInitialized = true
+            messages = source.messages.map { if (it.sessionId == source.piSessionId) it.copy(sessionId = sessionId) else it }.toMutableList()
         )
     }
 
@@ -315,8 +311,8 @@ class PiConversationService(private val project: Project) {
         }
 
         terminal().sendText(conversation.id, text)
-        conversation.messages.add(PiUserMessage(text))
-        conversation.viewRevision++
+        // Sending to the TUI is not evidence of a native user entry. History is
+        // updated only by session snapshots (commands may create no user entry).
         conversation.draft = ""
         conversation.draftRevision++
         persist()
@@ -446,10 +442,7 @@ class PiConversationService(private val project: Project) {
             createdAt = conversation.createdAt,
             messages = conversation.messages.toMutableList(),
             draft = "",
-            viewRevision = conversation.viewRevision,
-            hiddenEntries = conversation.hiddenEntries.toMutableSet(),
-            hiddenLegacy = conversation.hiddenLegacy.toMutableList(),
-            projectionInitialized = conversation.projectionInitialized
+            viewRevision = conversation.viewRevision
         )
         conversation.piSessionId = sessionId
         if (PiBridgeServer.getInstance(project).owns(tabKey)) {
@@ -578,11 +571,8 @@ class PiConversationService(private val project: Project) {
                     draft = s.draft,
                     draftRevision = s.draftRevision,
                     viewRevision = s.viewRevision,
-                    hiddenEntries = s.hiddenEntries.toMutableSet(),
-                    hiddenLegacy = s.hiddenLegacy.toMutableList(),
                     recoveryText = s.recoveryText,
-                    appliedOperations = s.appliedOperations.toMutableSet(),
-                    projectionInitialized = s.projectionInitialized
+                    appliedOperations = s.appliedOperations.toMutableSet()
                 )
             }
             activeId = store().activeId()?.takeIf { conversations.containsKey(it) }

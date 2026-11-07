@@ -2,61 +2,16 @@ package com.piterminal.bridge.conversations
 
 import com.piterminal.bridge.bridge.SessionSnapshot
 
-/** Pure projection policy; local hidden cards and legacy uncertainty survive full snapshots. */
+/** The message list is a cache of Pi's native active branch, never a second history. */
 object ConversationProjection {
-    data class Result(val changed: Boolean, val ambiguous: Boolean)
-    fun apply(c: PiConversation, snapshot: SessionSnapshot): Result {
-        if (!snapshot.usable || snapshot.sessionId != c.piSessionId) return Result(false, false)
-        val users = snapshot.users()
-        // Confirmed bindings constrain both ends of the old ordered sequence.
-        val sequence = (c.messages + c.hiddenLegacy).filter { old -> old.entryId == null ||
-            (old.sessionId == snapshot.sessionId && users.any { it.id == old.entryId }) }.sortedBy { it.timestamp }
-        fun matches(old: PiUserMessage, native: SessionSnapshot.UserEntry): Boolean =
-            if (old.entryId != null) old.entryId == native.id else old.text == native.text
-        val earliest = IntArray(sequence.size) { -1 }
-        val latest = IntArray(sequence.size) { -1 }
-        var cursor = 0
-        for (i in sequence.indices) {
-            val at = (cursor until users.size).firstOrNull { matches(sequence[i], users[it]) } ?: break
-            earliest[i] = at; cursor = at + 1
-        }
-        cursor = users.lastIndex
-        for (i in sequence.indices.reversed()) {
-            val at = (cursor downTo 0).firstOrNull { matches(sequence[i], users[it]) } ?: break
-            latest[i] = at; cursor = at - 1
-        }
-        // Identity keys matter: two old cards may have identical text and timestamp.
-        val bindings = java.util.IdentityHashMap<PiUserMessage, SessionSnapshot.UserEntry>()
-        if (earliest.all { it >= 0 } && latest.all { it >= 0 }) sequence.indices.forEach { i ->
-            if (sequence[i].entryId == null && earliest[i] == latest[i]) bindings[sequence[i]] = users[earliest[i]]
-        }
-        var metadataChanged = false
-        for (message in c.hiddenLegacy.toList()) bindings[message]?.let {
-            c.hiddenEntries.add(key(snapshot.sessionId, it.id)); c.hiddenLegacy.remove(message); metadataChanged = true
-        }
-        val existing = c.messages.filter { it.sessionId == snapshot.sessionId && it.entryId != null }.associateBy { it.entryId }.toMutableMap()
-        c.messages.filter { it.entryId == null }.forEach { old -> bindings[old]?.let { native ->
-            existing[native.id] = old.copy(sessionId = snapshot.sessionId, entryId = native.id)
-        } }
-        val unresolved = c.messages.filter { it.entryId == null && !bindings.containsKey(it) }
-        val reservedTexts = (unresolved + c.hiddenLegacy).map { it.text }.toSet()
-        if (!c.projectionInitialized) {
-            // Legacy XML never recorded deletions. Preserve its card visibility on
-            // first migration; unrepresented history stays available in the TUI.
-            users.filter { it.id !in existing && it.text !in reservedTexts }.forEach {
-                c.hiddenEntries.add(key(snapshot.sessionId, it.id))
-            }
-            c.projectionInitialized = true; metadataChanged = true
-        }
-        val next = users.filter { key(snapshot.sessionId, it.id) !in c.hiddenEntries &&
-            (it.id in existing || it.text !in reservedTexts) }.map { native ->
-            existing[native.id]?.takeIf { it.text == native.text } ?: PiUserMessage(native.text, native.timestamp, snapshot.sessionId, native.id)
-        } + unresolved
-        val changed = metadataChanged || next != c.messages
-        if (changed) {
-            c.messages.clear(); c.messages.addAll(next); c.viewRevision++
-        }
-        return Result(changed, unresolved.isNotEmpty() || c.hiddenLegacy.isNotEmpty())
+    fun apply(c: PiConversation, snapshot: SessionSnapshot): Boolean {
+        if (!snapshot.usable || snapshot.sessionId != c.piSessionId) return false
+        // Preserve native branch order and identity, including identical prompts.
+        val next = snapshot.users().map { PiUserMessage(it.text, it.timestamp, snapshot.sessionId, it.id) }
+        if (next == c.messages) return false
+        c.messages.clear()
+        c.messages.addAll(next)
+        c.viewRevision++
+        return true
     }
-    fun key(sessionId: String, entryId: String): String = "$sessionId:$entryId"
 }

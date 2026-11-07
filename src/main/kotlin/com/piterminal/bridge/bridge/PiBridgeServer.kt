@@ -156,7 +156,9 @@ class PiBridgeServer(private val project: Project) : Disposable {
         // Handlers touch UI-visible state (persist + notifications); dispatch on EDT.
         ApplicationManager.getApplication().invokeLater {
             if (project.isDisposed) return@invokeLater
-            if (seq > 0 && lastSeqByKey["$tabKey\u0000$type"] != seq) return@invokeLater
+            // State events: only the newest of a burst matters. file_modified carries a
+            // distinct path per seq, so every one must be routed.
+            if (seq > 0 && type in latestOnlyTypes && lastSeqByKey["$tabKey\u0000$type"] != seq) return@invokeLater
             route(tabKey, type, data)
         }
     }
@@ -204,6 +206,7 @@ class PiBridgeServer(private val project: Project) : Disposable {
 
     companion object {
         const val PROTOCOL_VERSION = 1 // legacy event envelope; v2 is negotiated by hello
+        private val latestOnlyTypes = setOf("agent_state", "model_changed", "session_changed", "session_stopped")
 
         fun getInstance(project: Project): PiBridgeServer = project.service()
     }
