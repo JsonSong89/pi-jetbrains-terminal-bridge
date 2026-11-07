@@ -28,6 +28,8 @@ It is **not** a vibe-coding cockpit. It is for people who want more control over
 - **One-click launch** — the toolbar button opens a dedicated Pi tab in the Terminal tool window and runs `pi` with your configured model / thinking level / extra args.
 - **Send to Pi** — select code in the editor, right-click → *Send to Pi*, and a file reference (`@path/file.go#L10-25`) lands in Pi's input.
 - **Fork / Rewind on every message** — each user-message card carries both actions, with deliberately different semantics: **fork** creates a new conversation that keeps history **up to and including** that message and its full reply (everything after is dropped, input left empty); **rewind** keeps the same session and moves the branch back to **before** that message (pi's `/tree` semantics — the message and later turns drop out of the model context, text back in the input for editing).
+- **Navigate long histories** — messages longer than ~480 chars collapse to four lines with an *Expand* link, and a thin rail next to the scroll bar puts one tick per message, spaced evenly by message index (a single huge message can't squeeze the rest out of reach). Click a tick to land on that message's header; `Alt+Up` / `Alt+Down` walk message by message.
+- **Scroll stays where you left it** — the history list no longer jumps to the bottom on agent state changes; it only follows the tail when you send, or when you were already near the bottom.
 - **Stay in sync with Pi's writes** — as soon as Pi finishes a write/edit tool, the IDE refreshes that file so you don't wait on the ~10s VFS poll. Optionally also open the file in the editor.
 - **Notifications (opt-in)**
   - balloon when the agent finishes (including error/abort reason) — only while the IDE is in the background; click to focus that terminal
@@ -127,6 +129,7 @@ Defaults — rebindable in **Settings → Keymap → "Pi Terminal Bridge"**:
 - `Alt+Shift+3` — send selection / file to Pi
 - `Ctrl+Alt+Shift+T` — focus the Pi terminal (only while the prompt input is focused; does not steal Refactor This from the editor)
 - `Ctrl+Alt+Shift+E` — focus the Pi prompt (only while a Pi terminal tab is focused)
+- `Alt+Up` / `Alt+Down` — jump to the previous / next message header in the history area (only while the history area is focused)
 
 ## Build
 
