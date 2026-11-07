@@ -1,8 +1,8 @@
-# Pi ↔ IDEA 桥接实现与开发约定（0.3.5 内测）
+# Pi ↔ IDEA 桥接实现与开发约定（0.4.0）
 
-> 本文描述双向操作重构后的源码；编译、真实 TUI 和 IDE 端验收尚待执行。
-> 插件版本仍为 0.3.5；托管 extension VERSION=9。正式 wire 契约见 [bridge-protocol.md](../bridge-protocol.md)，实施决策见 [双向操作通道与回退确认](../plans/2026-11-04-2114——双向操作通道与回退确认.md)。
-> 公共通道、Rewind 和 ForkWorkflow 的 wire 契约统一使用 v2；v1 仅保留状态/模型/写文件通知。本轮 Fork 代码仍待编译与真实 TUI / IDE 验证。
+> 本文描述双向操作重构后的源码；0.4.0 发布前已通过 dev 内测与 CI 构建。
+> 插件版本 0.4.0；托管 extension VERSION=10。正式 wire 契约见 [bridge-protocol.md](../bridge-protocol.md)，实施决策见 [双向操作通道与回退确认](../plans/2026-11-04-2114——双向操作通道与回退确认.md)。
+> 公共通道、Rewind 和 ForkWorkflow 的 wire 契约统一使用 v2；v1 仅保留状态/模型/写文件通知。
 
 ## 1. 产品结构
 

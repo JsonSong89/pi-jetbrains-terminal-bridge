@@ -69,7 +69,7 @@ pi 侧 extension 源码是资源文件 `src/main/resources/bridge/pi-launcher-br
   - 合并 `dev` → `main`
   - 创建/移动 tag
   - 修改 `build.gradle.kts` 的插件版本号
-- 发版前由用户安排严格内测；内测期间插件版本与所有 tag 保持在 `0.3.5`。
+- 发版前由用户安排严格内测；当前发布版本为 `0.4.0`，下一次发版的版本号在发版流程里确定。
 
 ## 文档同步约定
 
