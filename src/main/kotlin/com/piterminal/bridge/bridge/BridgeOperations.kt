@@ -126,8 +126,12 @@ class BridgeOperations(private val project: Project) : Disposable {
         val connection = PiBridgeServer.getInstance(project).connection(tab) ?: return
         if (!connection.supports("session.snapshot")) return
         val id = UUID.randomUUID().toString()
-        // Bound bookkeeping if a peer loses replies.
-        if (readRequests.size > 128) readRequests.clear()
+        // Bound bookkeeping if a peer loses replies. Evict the oldest entries
+        // instead of clearing everything, so fresh snapshot reads keep their routing.
+        while (readRequests.size >= 128) {
+            val oldest = readRequests.keys.firstOrNull() ?: break
+            readRequests.remove(oldest)
+        }
         readRequests[id] = tab
         connection.send(BridgeProtocol.frame("request").apply {
             addProperty("id", id); addProperty("method", "session.snapshot"); addProperty("methodVersion", 1)
