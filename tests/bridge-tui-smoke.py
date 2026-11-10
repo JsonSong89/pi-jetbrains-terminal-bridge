@@ -38,6 +38,8 @@ class BridgePeer:
                 raise EOFError("Bridge disconnected")
             assert len(line) <= 32 * 1024 * 1024, "Oversized bridge frame"
             value = json.loads(line)
+            assert value.get("v") == 2, "Only authenticated v2 frames are supported"
+            assert value.get("event") != "agent.finished", "Fork/Rewind must not emit agent completion"
             if value["type"] == "ping":
                 self.send(type="pong")
             elif value["type"] != "pong":
@@ -55,7 +57,8 @@ def accept_bridge(server):
             assert hello["piVersion"] == "1.5.0", hello.get("piVersion")
             peer.send(type="welcome", protocolVersion=2, connectionId=str(uuid.uuid4()))
             return peer, hello
-        peer.close()  # v1 notification compatibility
+        peer.close()
+        raise AssertionError("Expected a v2 hello; legacy connections are unsupported")
     raise RuntimeError("No v2 hello received")
 
 

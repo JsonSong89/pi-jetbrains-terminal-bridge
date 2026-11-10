@@ -1,8 +1,8 @@
 # Pi ↔ IDEA 桥接实现与开发约定（0.3.5 内测）
 
-> 本文描述双向操作重构后的源码；编译、真实 TUI 和 IDE 端验收尚待执行。
-> 插件版本仍为 0.3.5；托管 extension VERSION=9。正式 wire 契约见 [bridge-protocol.md](../bridge-protocol.md)，实施决策见 [双向操作通道与回退确认](../plans/2026-11-04-2114——双向操作通道与回退确认.md)。
-> 公共通道、Rewind 和 ForkWorkflow 的 wire 契约统一使用 v2；v1 仅保留状态/模型/写文件通知。本轮 Fork 代码仍待编译与真实 TUI / IDE 验证。
+> 本文描述当前源码；本轮 Node 契约及真实 TUI Fork/Rewind 验证通过，IDE 端验收与 CI 编译尚待执行。
+> 插件版本由发布流程管理；托管 extension VERSION=11。正式 wire 契约见 [bridge-protocol.md](../bridge-protocol.md)，实施决策见 [双向操作通道与回退确认](../plans/2026-11-04-2114——双向操作通道与回退确认.md)。
+> 公共通道、Rewind、ForkWorkflow 及全部事件统一使用 v2；旧 v1 短连接已移除。完成提醒改为独立的系统声音与后台应用图标提醒；见[实施方案](../plans/2026-11-10-1726——任务完成提醒与纯v2协议迁移.md)。
 
 ## 1. 产品结构
 
@@ -27,7 +27,7 @@ PiConversationPanel
 | 组件 | 职责 |
 |---|---|
 | `BridgeProtocol` / `SessionSnapshot` | 通用 JSON DTO、LF framing、原生分支校验与用户投影读取；未知 entry 字段保留 |
-| `PiBridgeServer` | loopback 监听、token/tab 校验、v1/v2 分流、单一活动连接 |
+| `PiBridgeServer` | loopback 监听、v2 hello/token/tab 校验、单一活动连接；拒绝旧协议 |
 | `BridgeConnection` | 认证连接绑定、后台读写、心跳、发送预算、断联 |
 | `BridgeOperations` / `OperationHandle` | 本地 preparation reservation、请求关联、耐久收件、原 ID 查询、稳定 tab 锁、只读结果订阅 |
 | `OperationStore` | 本地请求与业务 checkpoint 原子写入、容量保护 |
@@ -54,9 +54,9 @@ extension 在 `session_start` 之后派发唯一内部命令完成 probe，再�
 - 网络解析与日志在后台；IDE reader 等待后台消费，快照/UI 通知合并，避免 EDT 队列无限堆积。
 - 同时出现第二个活动 runtime 不直接接管；旧 socket 关闭后可重连。未知操作仍保留原请求身份与锁。
 
-v1 短连接事件暂保留，用于 working/idle、模型、写文件通知。按 `(tabKey,type)` 的 seq 去重；每个事件短暂失败时重试一次。状态类事件（`agent_state`、`model_changed`、`session_changed`、`session_stopped`）在 EDT 上只处理同类型最新一条；`file_modified` 每条对应不同路径，必须逐条处理，不能被后来的 seq 覆盖。v2 接管过的 tab，即使断联，旧 v1 `session_changed/stopped` 也不能抢先换绑或归档。
+仅接收认证后的 v2 事件；模型与 working 状态来自完整有效快照，文件变更通过 `file.modified` 逐条处理路径。会话绑定继续使用既有快照及 handoff 核验，终端停止由 Terminal 生命周期处理；断连不冒充进程停止。
 
-v2 快照是该 tab 会话绑定与分支投影的单一入口。agent 完成通知另用 v1 状态转换记录，避免快照同步吞掉 error/abort 通知。
+完成提醒使用 `agent_start` 分配 runId、`agent_settled` 发送的 `agent.finished`，按认证 tab/runtime/runId 去重；不从快照 idle 或 Fork/Rewind 的终态推断。默认关闭的声音与图标开关互相独立；正常完成/错误结束提醒、主动中止静默，不再弹完成 balloon。事件不耐久、不重放、不进入操作日志和业务提交。
 
 ## 4. 快照和本地卡片
 
@@ -153,9 +153,9 @@ ForkWorkflow 已使用通用交接：只捕获 ticket 配置和原生核验证�
 
 ## 10. 验证入口与未决项
 
-- `node --test tests/bridge-extension.test.mjs`：执行打包资源，覆盖 registry、快照、busy/取消/歧义、重复 ID、日志/断联/重启、执行结束证据、handoff、背压/framing 和保留的 v1 行为。
+- `node --test tests/bridge-extension.test.mjs`：执行打包资源，覆盖 registry、快照、busy/取消/歧义、重复 ID、日志/断联/重启、执行结束证据、handoff、背压/framing、v2 完成事件及重连不补响行为。
 - `./gradlew test`：JVM framing、原生快照、旧缓存替换、草稿/视图提交前置条件，以及完整 turn / 副本身份 / fork 提交策略。
 - `PI_BINARY=/path/to/pi python3 tests/bridge-tui-smoke.py`：隔离目录和配置，用 PTY 启动真实 pi 1.5.0，核验 probe、rewind、CLI 副本内 fork / 新实例交接、TUI 编辑器及零 prompt/model 事件。只操作临时 fixture，不使用 RPC。
 - GitHub CI 默认执行 Node 契约测试与 `test buildPlugin`；workflow_dispatch 可勾选 `tui_smoke` 安装固定 pi 版本执行真实 TUI smoke。手动 dev 构建不发布。
 
-本地依仓库约定只做静态检查，不运行 Gradle、单测或真实 TUI smoke；这些测试的存在不代表通过。发布前仍需真实长会话资源预算、IDE 断联/重开与本地提交崩溃窗口、用户实际发行版，以及 fork 的真实 withSession 生命周期与 label 适配验收。
+本轮已运行 Node 契约测试及真实 pi 1.5.0 TUI smoke（Fork/Rewind、编辑器保真、零模型请求）；未运行本地 Gradle。JVM 测试/编译仍交给 CI，声音和图标提醒仍需 Windows IDEA/JBR 实机验收。发布前仍需真实长会话资源预算、IDE 断联/重开与本地提交崩溃窗口、用户实际发行版及 label 适配验收。
