@@ -50,7 +50,7 @@ pi 侧 extension 源码是资源文件 `src/main/resources/bridge/pi-launcher-br
 - 日常开发在 `dev` 分支进行；`main` 保持可发布状态。
 - `dev` 是用户的测试分支：**不改插件版本号、不走 publish**。`build.gradle.kts` 的版本与 tag 只在发版流程里动。
 - 向 `dev` push **不会自动触发 GitHub Actions**（workflow 只监听 `main` push、`v*` tag push，以及指向 `main` 的 PR）。
-- 需要验证 `dev` 能否编译时，用 `workflow_dispatch` 手动触发一次构建（只编译 + 跑 bridge 单测 + 上传 artifact，不出 Release、不发 Marketplace，因为 `build.yml` 里建 Release 的步骤只在 `refs/tags/v*` 下执行，`publish.yml` 只监听 `release: created`）：
+- 需要验证 `dev` 能否编译时，用 `workflow_dispatch` 手动触发一次构建（只编译 + 跑 bridge 单测 + 上传 artifact，不出 Release，因为 `build.yml` 里建 Release 的步骤只在 `refs/tags/v*` 下执行）：
 
   ```bash
   # 仓库已存 GitHub 凭据，可直接复用（scope: repo, workflow）
@@ -64,12 +64,14 @@ pi 侧 extension 源码是资源文件 `src/main/resources/bridge/pi-launcher-br
   也可以用 GitHub 页面：Actions → Build and Release → Run workflow → 分支选 `dev`。注意 `gh auth status` 会因 token 缺 `read:org` 报错，但 `gh workflow run` 可用。
 - 需要正式 CI/发布验证时：
   - 把 `dev` 合并到 `main` 并 push `main`，触发 Build and Release；
-  - 或由用户明确授权后 push `v*` tag，触发构建、GitHub Release 与 Marketplace 发布。
+  - 或由用户明确授权后 push `v*` tag，触发构建并生成 GitHub Release。
+- **发布到 Marketplace 是手动的**：CI 只产 zip 并挂到 GitHub Release，仓库里没有 `publish.yml`，也没有 Marketplace secrets。用户验证 zip 后自己上传，流程见 `PUBLISH.md`。
+- **不要改写别人的分支**：`dev` 的历史由用户维护，压缩/整理只做在从 `main` 拉出的临时 feature 分支上（`feature/<version>`），再 `--no-ff` 合回 `main`；不 force-push `dev`。
 - 未经用户明确要求，不自行：
   - 合并 `dev` → `main`
   - 创建/移动 tag
   - 修改 `build.gradle.kts` 的插件版本号
-- 发版前由用户安排严格内测；内测期间插件版本与所有 tag 保持在 `0.3.5`。
+- 发版前由用户安排严格内测；当前发布版本为 `0.4.0`，下一次发版的版本号在发版流程里确定。
 
 ## 文档同步约定
 

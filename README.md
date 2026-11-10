@@ -29,6 +29,7 @@ It is **not** a vibe-coding cockpit. It is for people who want more control over
 - **Send to Pi** — select code in the editor, right-click → *Send to Pi*, and a file reference (`@path/file.go#L10-25`) lands in Pi's input.
 - **Fork / Rewind on every message** — each user-message card carries both actions, with deliberately different semantics: **fork** creates a new conversation that keeps history **up to and including** that message and its full reply (everything after is dropped, input left empty); **rewind** keeps the same session and moves the branch back to **before** that message (pi's `/tree` semantics — the message and later turns drop out of the model context, text back in the input for editing).
 - **Navigate long histories** — messages longer than ~480 chars collapse to four lines with an *Expand* link, and a thin rail next to the scroll bar puts one tick per message, spaced evenly by message index (a single huge message can't squeeze the rest out of reach). Click a tick to land on that message's header; `Alt+Up` / `Alt+Down` walk message by message.
+- **History mirrors Pi's branch** — cards are rendered from Pi's current native active branch with original entry ids and order, not by matching locally sent text; a card appears once Pi records the entry, and a quiet `user/assistant+tool` count sits above the input.
 - **Scroll stays where you left it** — the history list no longer jumps to the bottom on agent state changes; it only follows the tail when you send, or when you were already near the bottom.
 - **Stay in sync with Pi's writes** — as soon as Pi finishes a write/edit tool, the IDE refreshes that file so you don't wait on the ~10s VFS poll. Optionally also open the file in the editor.
 - **Completion alerts (opt-in)**
@@ -49,7 +50,7 @@ Terminal tab  ──  ~/.pi/agent/extensions/pi-launcher-bridge.ts (lazy-install
 ```
 
 - The managed extension (VERSION **11**) runs in the same interactive TUI process. A v2 authenticated connection carries requests, results and full native active-branch snapshots; it never starts a second pi process or uses RPC mode.
-- Rewind and Fork require the verified API baseline **pi 1.5.0 / session v3**, a successful command-dispatch probe and advertised capabilities. Unsupported versions keep control actions disabled. The Fork migration still needs CI, real TUI and IDE acceptance.
+- Rewind and Fork require the verified API baseline **pi 1.5.0 / session v3** and advertised capabilities. Unsupported versions keep control actions disabled; launch, send, history and notifications keep working.
 - Modification requests are saved and sent once. Disconnects and timeouts preserve the panel and query the original request id; reconnect never replays a modification. The toolbar offers **Sync current session** only when an unresolved operation has ended and can be reconciled.
 - All bridge traffic uses the authenticated v2 connection: working/model observations come from snapshots, and file changes/completion alerts use explicit events. Older extensions must be upgraded and their terminals restarted; v1 is no longer accepted. Completion events are best effort and are not replayed after reconnect. System sound and attention respect OS/IDE settings. See the [protocol](docs/bridge-protocol.md) for developer contracts.
 
@@ -125,8 +126,8 @@ Validation entry points: `node --test tests/bridge-extension.test.mjs`, Gradle
 `test`, and the opt-in real TUI smoke
 `PI_BINARY=/path/to/pi python3 tests/bridge-tui-smoke.py` (rewind and fork, including
 runtime replacement). CI can run the smoke
-through the `tui_smoke` workflow input. These checks still need to be run for
-this refactor; source delivery does not establish compatibility. Installation
+through the `tui_smoke` workflow input; the extension tests and Gradle tests run
+on every build. Installation
 compares full resource contents, and updated code loads in a new Pi Terminal
 or after pi `/reload`.
 

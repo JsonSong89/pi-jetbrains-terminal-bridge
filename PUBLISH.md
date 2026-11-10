@@ -7,54 +7,55 @@ Plugin identity:
 - **Version:** `build.gradle.kts` → `version`
 - **Repo:** https://github.com/JsonSong89/pi-jetbrains-terminal-bridge
 
-Do not publish from a local `./gradlew` run. CI on GitHub Actions is the source of truth.
-
-## First listing (manual, once)
-
-JetBrains requires the first upload of a new plugin ID to be done in the browser.
-
-1. Let **Build and Release** finish on `main` (or a `v*` tag) and download the zip from the workflow artifact / GitHub Release.
-2. Sign in at [plugins.jetbrains.com](https://plugins.jetbrains.com) with a JetBrains Account.
-3. **Profile → Add new plugin**, upload `build/distributions/pi-terminal-bridge-<version>.zip`.
-4. Fill category, license (MIT), repository URL, screenshots (panel, terminal, Send to Pi, settings). The HTML description comes from `plugin.xml`.
-5. Submit for review.
-
-Until this listing exists, `publishPlugin` will fail.
-
-## GitHub secrets (for later versions)
-
-| Secret | Required | Purpose |
-|---|---|---|
-| `JETBRAINS_PUBLISH_TOKEN` | yes | Marketplace token from [My Tokens](https://plugins.jetbrains.com/author/me/tokens) |
-| `CERTIFICATE_CHAIN` | no | Plugin signing |
-| `PRIVATE_KEY` | no | Plugin signing |
-| `PRIVATE_KEY_PASSWORD` | no | Plugin signing |
-
-`signPlugin` is skipped when the certificate secrets are empty.
+Publishing is **manual**: CI only builds the zip and attaches it to the GitHub
+Release. There is no `publish.yml` workflow and no Marketplace credential in
+GitHub secrets — the maintainer verifies the build, then uploads it.
 
 ## Shipping a new version
 
-Marketplace rejects a zip whose version was already published.
+Marketplace rejects a zip whose version was already published, so the version
+number is bumped exactly once per release.
 
 1. Bump `version` in `build.gradle.kts`.
-2. Update `<change-notes>` in `src/main/resources/META-INF/plugin.xml`.
-3. Commit and push `main`.
-4. Tag the same version and push the tag:
+2. Update `<change-notes>` in `src/main/resources/META-INF/plugin.xml`, and the
+   bilingual `<description>` if the feature set changed.
+3. Sync `README.md` / `README.zh-CN.md`.
+4. Land the work on `main` (see `AGENTS.md`: `dev` keeps its own history; the
+   release is squashed on a feature branch and merged).
+5. Tag and push:
 
 ```bash
-git tag v0.3.2
-git push origin v0.3.2
+git tag v0.4.0
+git push origin main v0.4.0
 ```
 
-5. Wait for two workflows:
-   - **Build and Release** (`v*` tag) — builds the zip and creates a GitHub Release
-   - **Publish Plugin** (`release` created) — `verifyPlugin` then `publishPlugin`
+6. **Build and Release** runs on the tag, builds
+   `build/distributions/pi-terminal-bridge-<version>.zip`, and attaches it to
+   the GitHub Release. The `main` push run is cancelled by the shared
+   per-sha concurrency group, so only one build happens.
+7. Verify that zip locally (install into a sandbox IDE, exercise the panel).
+8. Sign in at [plugins.jetbrains.com](https://plugins.jetbrains.com) and upload
+   the verified zip to the existing listing: **your plugin → Upload update**.
+   The HTML description and change notes come from `plugin.xml`.
+9. Submit for review. After approval, installed users get the update.
 
-After Marketplace review, installed users get the update.
+## Signing (optional)
+
+Signing is not required for an upload. If a signed build is wanted, run it
+locally with the certificate in the environment:
+
+```bash
+./gradlew signPlugin        # CERTIFICATE_CHAIN / PRIVATE_KEY / PRIVATE_KEY_PASSWORD
+./gradlew publishPlugin     # PUBLISH_TOKEN
+```
+
+`publishPlugin` uploads straight to Marketplace and is only a shortcut for the
+browser upload — it is not part of CI.
 
 ## Checklist
 
 - [ ] Version bumped; `plugin.xml` change-notes match
-- [ ] First listing already exists on plugins.jetbrains.com (or this *is* the first, uploaded manually)
-- [ ] `JETBRAINS_PUBLISH_TOKEN` is set
-- [ ] `vX.Y.Z` tag pushed; both Actions runs are green
+- [ ] README (both languages) reflects the release
+- [ ] `vX.Y.Z` tag pushed; **Build and Release** green; zip downloaded
+- [ ] Zip verified in a sandbox IDE
+- [ ] Zip uploaded manually to plugins.jetbrains.com and submitted

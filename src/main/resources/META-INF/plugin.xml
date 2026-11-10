@@ -39,6 +39,7 @@
         <li><b>Send to Pi</b> — select code, right-click, and send a file reference (<code>@path/file.go#L10-25</code>) to Pi's input. The panel input also has a context menu and accepts files dropped from the Project view.</li>
         <li><b>Immediate VFS refresh</b> when Pi writes a file — no waiting on the IDE's ~10s disk poll; optionally also open the file</li>
         <li><b>Fork / Rewind</b> on every message card — <b>Fork</b> starts a new conversation at that message: history up to and including the message and its full reply is kept, everything after is dropped, and the input stays empty. <b>Rewind</b> stays in the same session and moves the branch back to <i>before</i> that message (pi's <code>/tree</code>), pre-filling the panel input with its text for re-sending. The two are deliberately different.</li>
+        <li><b>History straight from Pi's branch</b> — message cards come from the current native active branch in original entry order; long messages collapse to four lines, and a per-message rail plus <code>Alt+Up</code> / <code>Alt+Down</code> let you jump back through a long session.</li>
         <li><b>Completion alerts</b> — optional system sound in foreground/background and taskbar / Dock attention in the background; normal completion and errors only, manual aborts stay silent. Platform settings apply.</li>
         <li><b>Flexible configuration</b> for models, thinking levels, and launch options</li>
     </ul>
@@ -99,6 +100,7 @@
         <li><b>发送到 Pi</b> —— 选中代码，右键发送文件引用（<code>@path/file.go#L10-25</code>）到 Pi 输入栏。面板输入栏也有右键菜单，并接受从 Project 视图拖入的文件。</li>
         <li><b>Pi 写完立刻刷新</b> —— 不等 IDEA 大约 10 秒的磁盘轮询；也可选打开该文件</li>
         <li><b>Fork / Rewind</b> —— 每条用户消息卡片都有两个按钮，语义刻意不同：<b>Fork</b> 新开一个会话，保留到该消息（含该轮完整回复）为止，其后历史全部丢弃，输入框留空；<b>Rewind</b> 不换会话，把当前会话的活跃分支退到该消息<b>之前</b>（对应 pi 的 <code>/tree</code>），仅把该消息文本预填到面板输入框供修改重发。</li>
+        <li><b>历史直接来自 Pi 的分支</b> —— 消息卡片取自当前原生活跃分支，保留原始条目顺序；超长消息折叠为 4 行，滚动条旁按消息打点的轨道搭配 <code>Alt+↑</code> / <code>Alt+↓</code>，长会话可以随时往回跳。</li>
         <li><b>完成提醒</b> —— 可选系统提示音（前后台均可）和后台任务栏 / Dock 提醒；正常完成及出错时提醒，主动中止静默，遵守平台设置。</li>
         <li><b>灵活配置</b> —— 模型、thinking 级别与启动参数</li>
     </ul>
@@ -126,13 +128,21 @@
         ]]></description>
 
     <change-notes><![CDATA[
+    <h3>0.4.0</h3>
+    <ul>
+        <li><b>The bridge now speaks a durable v2 operation protocol.</b> Requests are journaled and sent once; a disconnect or timeout keeps the panel as-is and only queries the original operation id — reconnect never replays a modification. Fork and Rewind are real operations instead of pasted terminal commands, and the panel keeps its copy visible until pi confirms the result through a validated branch snapshot.</li>
+        <li><b>History is Pi's history.</b> Message cards are rendered from the current native active branch with original session/entry ids and branch order, instead of matching locally sent text: a card appears once pi records the entry, <code>/model</code> creates none, and the input bar shows a quiet <code>user/assistant+tool</code> count. Rewind/fork targets are verified by native entry identity, so hidden or stale messages can no longer be picked.</li>
+        <li><b>Long histories are navigable.</b> Messages over ~480 chars collapse to four lines with an Expand link (very long ones cap at 200 lines when opened), a thin rail next to the scroll bar puts one evenly spaced tick per message, and <code>Alt+Up</code> / <code>Alt+Down</code> walk message by message. Agent state changes no longer drag the list back to the bottom.</li>
+        <li><b>Panel restyle</b> with New UI components: compact icon actions at the card's lower right, recovery actions (Sync current session, Restore text, Stop fork preparation) shown only when they apply, and a cleaner conversation selector.</li>
+        <li>Fix: the conversation dropdown's delete button no longer sits under the popup's overlay scrollbar.</li>
+        <li>Requires <b>pi 1.5.0 / session v3</b> for Fork and Rewind; unsupported versions keep those actions disabled and the plugin degrades to launch, send and notifications. Build: Gradle wrapper 9.8.2, IntelliJ Platform through 2026.3 (<code>untilBuild=263.*</code>).</li>
+    </ul>
     <h3>0.3.5</h3>
     <ul>
         <li><b>Fork a conversation at any message.</b> Each user-message card has a Fork button (branch icon): it creates a new conversation named <code>&lt;original&gt;-fork</code> that keeps the history <b>up to and including</b> that message and its complete reply — tool calls/results included — and drops everything after it. The panel input stays empty, so you continue from exactly that point in a fresh session; the original conversation is untouched. This is intentionally not pi's default <code>/fork</code> (edit-before): the message you forked on stays in history.</li>
         <li><b>Rewind within the current session.</b> The Rewind button (undo icon) is the in-session variant of pi's <code>/tree</code>: it moves the session branch back to <b>before</b> that message — no new session, no terminal restart — so the message itself and everything after it drop out of the model context, and the message text is pre-filled in the panel input for re-sending. Tree entries stay in the session file, like <code>/tree</code>. Fork and Rewind are kept distinct on purpose.</li>
         <li><b>Immediate VFS refresh while Pi is still working.</b> Files written by Pi's <code>edit</code>/<code>write</code> tools sync in the IDE right after each tool result, instead of waiting for the ~10s disk poll; optionally the file is also opened in the editor.</li>
         <li>Message-card actions ordered rewind / fork / copy / delete with smaller icon buttons and a proper trash icon; the delete tooltip clarifies it only removes the panel card, not the Pi session.</li>
-        <li>Compatibility: IntelliJ Platform through 2026.3 (<code>untilBuild=263.*</code>).</li>
     </ul>
     <h3>0.3.3</h3>
     <ul>
