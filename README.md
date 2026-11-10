@@ -32,9 +32,11 @@ It is **not** a vibe-coding cockpit. It is for people who want more control over
 - **History mirrors Pi's branch** — cards are rendered from Pi's current native active branch with original entry ids and order, not by matching locally sent text; a card appears once Pi records the entry, and a quiet `user/assistant+tool` count sits above the input.
 - **Scroll stays where you left it** — the history list no longer jumps to the bottom on agent state changes; it only follows the tail when you send, or when you were already near the bottom.
 - **Stay in sync with Pi's writes** — as soon as Pi finishes a write/edit tool, the IDE refreshes that file so you don't wait on the ~10s VFS poll. Optionally also open the file in the editor.
-- **Notifications (opt-in)**
-  - balloon when the agent finishes (including error/abort reason) — only while the IDE is in the background; click to focus that terminal
-  - open files Pi edited (still opt-in; refresh itself is always on)
+- **Completion alerts (opt-in)**
+  - system sound on normal completion or error, in the foreground and background
+  - taskbar / Dock attention while the IDE is in the background; appearance and duration follow the platform
+  - manual aborts stay silent; no completion balloon or automatic focus change. Both new options default to off; the old balloon setting is retired.
+- **Open edited files (opt-in)** — file refresh itself is always on.
 - **Diagnostics** — Settings shows the bridge extension state and server port.
 
 ## How the bridge works
@@ -47,10 +49,10 @@ IDEA (PiBridgeServer, loopback TCP + token)
 Terminal tab  ──  ~/.pi/agent/extensions/pi-launcher-bridge.ts (lazy-installed, content-compared)
 ```
 
-- The managed extension (VERSION **10**) runs in the same interactive TUI process. A v2 authenticated connection carries requests, results and full native active-branch snapshots; it never starts a second pi process or uses RPC mode.
+- The managed extension (VERSION **11**) runs in the same interactive TUI process. A v2 authenticated connection carries requests, results and full native active-branch snapshots; it never starts a second pi process or uses RPC mode.
 - Rewind and Fork require the verified API baseline **pi 1.5.0 / session v3** and advertised capabilities. Unsupported versions keep control actions disabled; launch, send, history and notifications keep working.
 - Modification requests are saved and sent once. Disconnects and timeouts preserve the panel and query the original request id; reconnect never replays a modification. The toolbar offers **Sync current session** only when an unresolved operation has ended and can be reconciled.
-- Working/model/file notifications retain the v1 path. Fork and Rewind use v2 operations. Once v2 owns a tab, delayed v1 session events cannot rebind it. See the [protocol](docs/bridge-protocol.md) for developer contracts.
+- All bridge traffic uses the authenticated v2 connection: working/model observations come from snapshots, and file changes/completion alerts use explicit events. Older extensions must be upgraded and their terminals restarted; v1 is no longer accepted. Completion events are best effort and are not replayed after reconnect. System sound and attention respect OS/IDE settings. See the [protocol](docs/bridge-protocol.md) for developer contracts.
 
 ## Usage
 
@@ -140,7 +142,8 @@ power — combine them freely.
 | Setting | Description |
 |---|---|
 | Model / thinking level / extra args | Passed to the `pi` CLI at launch |
-| Notify on agent end | Balloon when a conversation's agent settles (opt-in; only if the IDE is in the background; click to focus that terminal) |
+| Play a system sound | Sound on normal completion or error in foreground/background (opt-in); manual aborts stay silent. System volume and sound settings apply. |
+| Request taskbar / Dock attention | Background completion/error attention (opt-in); appearance and duration follow OS/IDE settings. |
 | Open files modified by Pi | Also open the file in the editor after a write (opt-in). VFS refresh is always on. |
 | Bridge diagnostics | Read-only: extension state + server port |
 

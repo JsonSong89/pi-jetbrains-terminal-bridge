@@ -74,6 +74,8 @@ class PiConversationService(private val project: Project) {
         if (operations.project(c, snapshot)) saveOperationView(tabKey)
         val working = snapshot.raw.getAsJsonObject("state").get("idle")?.asBoolean != true
         synchronized(workingIds) { if (working) workingIds.add(tabKey) else workingIds.remove(tabKey) }
+        val model = snapshot.raw.getAsJsonObject("state").get("model")?.takeIf { it.isJsonPrimitive }?.asString
+        synchronized(models) { if (model == null) models.remove(tabKey) else models[tabKey] = model }
         operationChanged(tabKey)
         PiStatusWidget.update(project)
     }
@@ -99,13 +101,11 @@ class PiConversationService(private val project: Project) {
     private val listeners = CopyOnWriteArrayList<Listener>()
     @Volatile
     private var activeId: String? = null
-    /** Working badges. Owner: v2 snapshots once the bridge owns the tab; v1 agent_state before that. */
+    /** Working badges and models are observations from valid v2 snapshots. */
     private val workingIds = mutableSetOf<String>()
-    /** Edge detection for the agent-finish notification (v1 agent_state telemetry). */
-    private val telemetryWorkingIds = mutableSetOf<String>()
     /** Tabs whose pi session id was confirmed by the bridge at least once. */
     private val boundTabs = mutableSetOf<String>()
-    /** Latest model per conversation id (bridge model_changed). */
+    /** Latest model per conversation id, read from the v2 snapshot. */
     private val models = mutableMapOf<String, String>()
 
     init {
@@ -115,6 +115,8 @@ class PiConversationService(private val project: Project) {
         terminal.addListener(object : PiTerminalService.SessionListener {
             override fun onSessionEnded(conversationId: String) {
                 forks.stopPreparing(conversationId)
+                synchronized(workingIds) { workingIds.remove(conversationId) }
+                synchronized(models) { models.remove(conversationId) }
                 notifyListeners(ChangeEvent(ChangeKind.STRUCTURE, conversationId))
                 PiStatusWidget.update(project)
             }
@@ -463,52 +465,6 @@ class PiConversationService(private val project: Project) {
         persist()
         logger.info("Rebound conversation ${conversation.id} to pi session $sessionId (archived $previousSessionId)")
         notifyListeners(ChangeEvent(ChangeKind.STRUCTURE, conversation.id))
-    }
-
-    fun onBridgeSessionStopped(tabKey: String) {
-        synchronized(workingIds) { workingIds.remove(tabKey) }
-        synchronized(telemetryWorkingIds) { telemetryWorkingIds.remove(tabKey) }
-        notifyListeners(ChangeEvent(ChangeKind.STRUCTURE, tabKey))
-        PiStatusWidget.update(project)
-    }
-
-    fun onBridgeAgentState(tabKey: String, state: String, stopReason: String? = null) {
-        val working = state == "working"
-        synchronized(workingIds) { if (working) workingIds.add(tabKey) else workingIds.remove(tabKey) }
-        notifyListeners(ChangeEvent(ChangeKind.STATE, tabKey))
-        PiStatusWidget.update(project)
-        onBridgeAgentStateTelemetry(tabKey, state, stopReason)
-    }
-
-    /** Agent-finish notification telemetry only; never touches the working badge. */
-    fun onBridgeAgentStateTelemetry(tabKey: String, state: String, stopReason: String? = null) {
-        val conversation = get(tabKey) ?: return
-        val working = state == "working"
-        val becameIdle = synchronized(telemetryWorkingIds) {
-            val wasWorking = tabKey in telemetryWorkingIds
-            if (working) telemetryWorkingIds.add(tabKey) else telemetryWorkingIds.remove(tabKey)
-            wasWorking && !working
-        }
-        if (becameIdle && PiSettings.getInstance().state.notifyOnAgentEnd && !PiBridgeUi.isIdeActive(project)) {
-            val detail = when (stopReason) {
-                "error" -> " (stopped with an error)"
-                "aborted" -> " (aborted)"
-                else -> ""
-            }
-            PiBridgeUi.notifyOpenTerminal(
-                project,
-                conversation.title,
-                "Agent finished$detail.",
-                NotificationType.INFORMATION
-            ) {
-                revealTerminal(conversation.id)
-            }
-        }
-    }
-
-    fun onBridgeModelChanged(tabKey: String, modelId: String) {
-        synchronized(models) { models[tabKey] = modelId }
-        notifyListeners(ChangeEvent(ChangeKind.STATE, tabKey))
     }
 
     /** Pi wrote a file; sync the VFS immediately so the editor doesn't wait on the ~10s poll. */

@@ -24,7 +24,8 @@ class PiSettingsConfigurable : Configurable {
     private var extraArgsField: JBTextField? = null
     private var sendShortcutCombo: ComboBox<String>? = null
     private var conversationFontSizeSpinner: JSpinner? = null
-    private var notifyAgentEndCheck: JCheckBox? = null
+    private var soundAgentEndCheck: JCheckBox? = null
+    private var attentionAgentEndCheck: JCheckBox? = null
     private var openModifiedFilesCheck: JCheckBox? = null
 
     companion object {
@@ -83,9 +84,13 @@ class PiSettingsConfigurable : Configurable {
                 1
             )
         )
-        notifyAgentEndCheck = JCheckBox(
-            "Notify when the agent finishes (only if the IDE is in the background; click to focus the terminal)",
-            settings.notifyOnAgentEnd
+        soundAgentEndCheck = JCheckBox(
+            "Play a system sound when the agent finishes",
+            settings.soundOnAgentEnd
+        )
+        attentionAgentEndCheck = JCheckBox(
+            "Request taskbar / Dock attention when the agent finishes",
+            settings.attentionOnAgentEnd
         )
         openModifiedFilesCheck = JCheckBox(
             "Open files modified by Pi in the editor (the project always refreshes as soon as Pi writes)",
@@ -140,7 +145,16 @@ class PiSettingsConfigurable : Configurable {
                 foreground = JBUI.CurrentTheme.ContextHelp.FOREGROUND
                 font = JBUI.Fonts.smallFont()
             }, 0)
-            .addComponent(notifyAgentEndCheck!!)
+            .addComponent(soundAgentEndCheck!!)
+            .addComponent(JBLabel("Sound plays in the foreground and background. System sound and volume settings apply.").apply {
+                foreground = JBUI.CurrentTheme.ContextHelp.FOREGROUND
+                font = JBUI.Fonts.smallFont()
+            })
+            .addComponent(attentionAgentEndCheck!!)
+            .addComponent(JBLabel("Background only; appearance and duration follow the platform. Manual aborts stay silent.").apply {
+                foreground = JBUI.CurrentTheme.ContextHelp.FOREGROUND
+                font = JBUI.Fonts.smallFont()
+            })
             .addComponent(openModifiedFilesCheck!!)
 
             // Diagnostics (read-only)
@@ -169,7 +183,8 @@ class PiSettingsConfigurable : Configurable {
                 extraArgsField?.text != settings.extraArgs ||
                 (sendShortcutCombo?.selectedItem == SEND_CTRL_ENTER) != settings.sendWithCtrlEnter ||
                 fontSizeValue() != settings.conversationFontSize ||
-                notifyAgentEndCheck?.isSelected != settings.notifyOnAgentEnd ||
+                soundAgentEndCheck?.isSelected != settings.soundOnAgentEnd ||
+                attentionAgentEndCheck?.isSelected != settings.attentionOnAgentEnd ||
                 openModifiedFilesCheck?.isSelected != settings.openModifiedFiles
     }
 
@@ -182,7 +197,8 @@ class PiSettingsConfigurable : Configurable {
         state.extraArgs = extraArgsField?.text ?: ""
         state.sendWithCtrlEnter = sendShortcutCombo?.selectedItem == SEND_CTRL_ENTER
         state.conversationFontSize = fontSizeValue()
-        state.notifyOnAgentEnd = notifyAgentEndCheck?.isSelected == true
+        state.soundOnAgentEnd = soundAgentEndCheck?.isSelected == true
+        state.attentionOnAgentEnd = attentionAgentEndCheck?.isSelected == true
         state.openModifiedFiles = openModifiedFilesCheck?.isSelected == true
         PiSettings.getInstance().notifyChanged()
     }
@@ -199,7 +215,8 @@ class PiSettingsConfigurable : Configurable {
             PiSettings.MIN_FONT_SIZE,
             PiSettings.MAX_FONT_SIZE
         )
-        notifyAgentEndCheck?.isSelected = settings.notifyOnAgentEnd
+        soundAgentEndCheck?.isSelected = settings.soundOnAgentEnd
+        attentionAgentEndCheck?.isSelected = settings.attentionOnAgentEnd
         openModifiedFilesCheck?.isSelected = settings.openModifiedFiles
     }
 

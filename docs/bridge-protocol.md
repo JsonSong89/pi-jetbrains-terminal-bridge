@@ -192,11 +192,28 @@ UI 本地应用的幂等标记与业务状态一起持久化；LOCAL_CONFLICT/LO
 
 日志输出允许 id、method、状态、耗时、脱敏 session 标识及错误码；默认禁止 token、全文 params、完整 snapshot。错误弹窗不是持久执行日志。
 
-## 7. v1 兼容与演进
+## 7. v2 事件与 v1 退出
 
-现有 v1 短连接事件可继续保留；v2 操作结果不使用 v1 的 `(tabKey,type)` last-seq 去重，必须按 id 独立关联。
+认证后的通知与状态观察统一使用 v2 `event`，不接受或发送 v1 短连接事件。旧 extension 必须升级并重启终端；不能回退到 v1。连接身份提供 tabKey/runtimeId，事件不得覆盖它们。
 
-v2 接管 tab 的 session 绑定与快照后，旧 v1 session_changed/stopped 不得重复提交或归档；明确设定单一状态所有者。旧 extension 无 capability 时禁用新操作并提示升级/重启，不自动 fallback 粘贴。
+### 7.1 Agent 完成
+
+```json
+{"v":2,"type":"event","event":"agent.finished","runId":"<uuid>","sessionId":"<pi-session-id>","outcome":"completed"}
+```
+
+- `agent_start` 创建 runId；`agent_end` 只采集结束原因；`agent_settled` 发送一次事件并清除本次运行。outcome 为 `completed | error | aborted`。没有本实例的 start 不补造完成。
+- IDE 按认证 `(tabKey,runtimeId,runId)` 记忆近期事件并去重；aborted 不提醒。正常/错误结束按两个默认关闭的独立开关播放系统提示音、请求后台应用图标提醒；不发完成 balloon、不抢焦点。
+- 完成事件不是 bridge operation 结果；不得修改操作状态、日志、资源锁或 handoff。快照 idle、断连、操作终态不推断为 agent 完成。
+- 完成事件仅在已 welcome 的连接上发送，不耐久、不重放；断连时可能遗漏提醒。重连快照不补响。IDE 丢弃已退休连接的事件。
+
+### 7.2 文件、模型与生命周期
+
+```json
+{"v":2,"type":"event","event":"file.modified","path":"<file-path>"}
+```
+
+文件事件沿用 VFS 刷新/按设置打开的行为，每个路径分别处理，不按最新状态合并。模型及 working 状态来自有效 v2 snapshot；会话绑定仍走 hello、快照与既有 handoff 核验，禁止通知事件参与会话提交。终端进程退出由 Terminal 生命周期处理；断连只代表不可达，不能冒充进程停止。
 
 兼容字段增加保持 v2；未知可选字段忽略，未知原生 entry 保留。未知 method/version 明确拒绝。必需语义变化升级协议或 method 版本，不默默改变旧客户端行为。
 
@@ -213,7 +230,7 @@ v2 接管 tab 的 session 绑定与快照后，旧 v1 session_changed/stopped �
 
 新增 replacement 方法复用 handoff；多阶段流程（如新 Terminal fork）放业务 Workflow。若新增方法要求改 Transport/公共执行状态，先审查抽象边界，不直接添加特例。
 
-必须测试：accepted 不是成功；超时只 query；重复 id 不执行两次；同 id 不同参数拒绝；丢包/断联/重启不重放；取消和部分副作用；当前/历史快照不同；未知字段；超大/不完整快照；旧 v1 乱序；withSession 新旧实例顺序；TUI 编辑内容保真且零模型请求污染。
+必须测试：accepted 不是成功；超时只 query；重复 id 不执行两次；同 id 不同参数拒绝；丢包/断联/重启不重放；取消和部分副作用；当前/历史快照不同；未知字段；超大/不完整快照；v1 拒绝、完成事件去重与断连不重放；withSession 新旧实例顺序；TUI 编辑内容保真且零模型请求污染。
 
 ## 9. 规范来源与实施前校准
 

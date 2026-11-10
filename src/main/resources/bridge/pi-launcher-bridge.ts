@@ -266,8 +266,8 @@ class PiAdapter {
     pi.on("input", (event, ctx) => {
       const text = String(event.text).trimStart();
       if (text.startsWith("/pi-bridge-internal-")) return { action: "handled" };
-      // v1-era slash commands: keep consuming them so old habits never reach the
-      // model prompt. Candidate for removal after the first v2 release ships.
+      // Consume retired control commands locally so they cannot become model prompts.
+      // This input guard does not send or accept any legacy protocol messages.
       if (/^\/bridge-(?:rewind|fork)(?:\s|$)/.test(text)) {
         ctx?.ui?.notify?.("Legacy control commands are disabled; update Pi Terminal Bridge and restart the terminal", "warning");
         return { action: "handled" };
@@ -621,34 +621,20 @@ class OperationRuntime {
   }
 }
 
-let seq = Date.now() * 1000;
-let sessionId;
-let lastRunStopReason;
-// v1 remains for two reasons: agent/model/file notifications even under v2, and
-// session_changed/stopped for old extensions talking to a new IDE (a tab without a
-// v2 hello is unmanaged, so the legacy binding path must stay alive).
-function send(type, data) {
-  if (!enabled()) return;
-  const payload = JSON.stringify({ v: 1, seq: seq++, type, tabKey: TAB_KEY, token: TOKEN, data }) + "\n";
-  const attempt = timeout => {
-    const socket = net.connect(PORT, "127.0.0.1");
-    socket.setTimeout(timeout, () => socket.destroy());
-    socket.on("error", () => socket.destroy());
-    socket.on("connect", () => socket.end(payload));
-  };
-  attempt(500);
-  const retry = setTimeout(() => attempt(1500), 1500); retry.unref?.();
-}
 function modelLabel(model) { return model?.id ? (model.provider ? `${model.provider}/${model.id}` : model.id) : undefined; }
-function refreshSessionId(ctx) { sessionId = ctx?.sessionManager?.getSessionId?.() ?? sessionId; }
-function reportModel(model) { const modelId = modelLabel(model); if (modelId) send("model_changed", { modelId }); }
 
 export default function (pi) {
   if (!enabled()) return;
   const runtimeId = crypto.randomUUID();
   const adapter = new PiAdapter(pi, runtimeId);
   const journal = new OperationJournal(JOURNAL_DIR, runtimeId);
-  let transport, runtime, closed = false, snapshotTimer;
+  let transport, runtime, closed = false, reachable = false, snapshotTimer;
+  let sessionId, runId, lastRunStopReason;
+  // Best-effort events use only the authenticated live connection, never replay.
+  const sendEvent = (event, data) => {
+    if (closed || !reachable) return;
+    try { transport?.send(frame("event", { event, ...data })); } catch (_e) { /* Notification failure cannot fail a pi callback. */ }
+  };
   const snapshot = () => adapter.dispatch(ctx => adapter.capture(ctx));
   const publishSnapshot = () => {
     clearTimeout(snapshotTimer);
@@ -659,7 +645,7 @@ export default function (pi) {
     }, 100); snapshotTimer.unref?.();
   };
   pi.on("session_start", (_event, ctx) => {
-    lastRunStopReason = undefined; refreshSessionId(ctx); reportModel(ctx.model);
+    lastRunStopReason = undefined; runId = undefined; sessionId = ctx?.sessionManager?.getSessionId?.();
     // Defer command dispatch until the event boundary has drained.
     const startup = setTimeout(async () => {
       if (closed) return;
@@ -682,37 +668,39 @@ export default function (pi) {
             runtime.safeSend(runtime.response(message, { status: "failed", effect: "none", error: { code: "UNSUPPORTED", message: "Method capability is unavailable" } })); return;
           }
           return runtime.enqueue(message);
-        }, reachable => { if (reachable) publishSnapshot(); });
+        }, connected => { reachable = connected; if (connected) publishSnapshot(); });
       transport.start();
     }, 0); startup.unref?.();
-    // v1 is retained for old IDE installations. A v2 owner ignores these bindings.
-    send("session_changed", { sessionId, extensionVersion: String(VERSION) });
   });
   pi.on("session_shutdown", async () => {
-    closed = true; clearTimeout(snapshotTimer); transport?.close(); adapter.close();
+    closed = true; reachable = false; runId = undefined; clearTimeout(snapshotTimer); transport?.close(); adapter.close();
     await journal.close().catch(() => {});
-    send("session_stopped", {});
   });
   for (const name of ["session_tree", "session_compact", "session_info_changed", "message_end", "model_select"]) {
     pi.on(name, () => { adapter.generation++; publishSnapshot(); });
   }
-  pi.on("agent_start", () => { adapter.generation++; lastRunStopReason = undefined; send("agent_state", { state: "working" }); });
+  pi.on("agent_start", (_event, ctx) => {
+    adapter.generation++; runId = crypto.randomUUID(); lastRunStopReason = undefined;
+    sessionId = ctx?.sessionManager?.getSessionId?.() ?? sessionId;
+    publishSnapshot();
+  });
   pi.on("agent_end", event => {
     const messages = event?.messages ?? [];
     lastRunStopReason = [...messages].reverse().map(m => m?.message ?? m).find(m => m?.role === "assistant")?.stopReason;
   });
   pi.on("agent_settled", event => {
     adapter.generation++; publishSnapshot();
-    const stopReason = event?.aborted ? "aborted" : lastRunStopReason === "error" ? "error" : undefined;
-    lastRunStopReason = undefined; send("agent_state", stopReason ? { state: "idle", stopReason } : { state: "idle" });
+    const outcome = event?.aborted ? "aborted" : lastRunStopReason === "error" ? "error" : "completed";
+    const finishedRun = runId;
+    runId = undefined; lastRunStopReason = undefined;
+    if (finishedRun && sessionId) sendEvent("agent.finished", { runId: finishedRun, sessionId, outcome });
   });
-  pi.on("model_select", event => reportModel(event.model));
   pi.on("tool_result", event => {
     const data = event?.data ?? event ?? {};
     if (!["edit", "write", "patch", "apply"].includes(String(data.toolName ?? data.tool ?? ""))) return;
     const input = data.input ?? data.args ?? {}, details = data.details ?? data.result ?? {};
     const paths = [input.path, input.filePath, input.file_path, input.file, details.path, details.filePath, details.file_path,
       ...(Array.isArray(input.edits) ? input.edits.map(e => typeof e === "string" ? e : e?.path) : [])];
-    for (const p of paths) if (typeof p === "string" && p.length) send("file_modified", { path: p });
+    for (const p of paths) if (typeof p === "string" && p.length) sendEvent("file.modified", { path: p });
   });
 }
