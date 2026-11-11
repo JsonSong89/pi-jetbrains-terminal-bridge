@@ -49,8 +49,8 @@ IDEA (PiBridgeServer, loopback TCP + token)
 Terminal tab  ──  ~/.pi/agent/extensions/pi-launcher-bridge.ts (lazy-installed, content-compared)
 ```
 
-- The managed extension (VERSION **11**) runs in the same interactive TUI process. A v2 authenticated connection carries requests, results and full native active-branch snapshots; it never starts a second pi process or uses RPC mode.
-- Rewind and Fork require the verified API baseline **pi 1.5.0 / session v3** and advertised capabilities. Unsupported versions keep control actions disabled; launch, send, history and notifications keep working.
+- The managed extension (VERSION **12**) runs in the same interactive TUI process. A v2 authenticated connection carries requests, results and full native active-branch snapshots; it never starts a second pi process or uses RPC mode.
+- Rewind and Fork require a verified TUI command probe and session format **v3+**; there is no exact pi version lock. Capabilities are advertised only after the probe succeeds, and real incompatibilities surface as explicit operation errors instead of disabling the whole plugin on a minor pi update.
 - Modification requests are saved and sent once. Disconnects and timeouts preserve the panel and query the original request id; reconnect never replays a modification. The toolbar offers **Sync current session** only when an unresolved operation has ended and can be reconciled.
 - All bridge traffic uses the authenticated v2 connection: working/model observations come from snapshots, and file changes/completion alerts use explicit events. Older extensions must be upgraded and their terminals restarted; v1 is no longer accepted. Completion events are best effort and are not replayed after reconnect. System sound and attention respect OS/IDE settings. See the [protocol](docs/bridge-protocol.md) for developer contracts.
 
@@ -162,7 +162,7 @@ Defaults — rebindable in **Settings → Keymap → "Pi Terminal Bridge"**:
 ```bash
 node --test tests/bridge-extension.test.mjs   # packaged extension and fault contracts
 ./gradlew test         # JVM protocol/projection/commit contracts
-PI_BINARY=/path/to/pi python3 tests/bridge-tui-smoke.py  # opt-in real pi 1.5.0 PTY smoke
+PI_BINARY=/path/to/pi python3 tests/bridge-tui-smoke.py  # opt-in real pi 1.5.x PTY smoke
 ./gradlew build        # verify
 ./gradlew runIde       # sandbox IDE
 ./gradlew buildPlugin  # distributable zip

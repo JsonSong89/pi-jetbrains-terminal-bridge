@@ -49,8 +49,8 @@ IDEA（PiBridgeServer，loopback TCP + token）
 Terminal 标签页 ── ~/.pi/agent/extensions/pi-launcher-bridge.ts（懒安装，按完整内容比对更新）
 ```
 
-- 托管 extension（VERSION **11**）仍运行在同一个交互式 TUI 进程里；v2 认证长连接传输请求、结果和完整原生活跃分支快照，不使用 RPC mode 或另起 pi 进程。
-- Rewind / Fork 的 API 基线锁定 **pi 1.5.0 / session v3**，并需声明 capability；不支持的版本关闭控制操作，启动、发送、历史与通知照常工作。
+- 托管 extension（VERSION **12**）仍运行在同一个交互式 TUI 进程里；v2 认证长连接传输请求、结果和完整原生活跃分支快照，不使用 RPC mode 或另起 pi 进程。
+- Rewind / Fork 不锁定精确 pi 版本：probe 通过且原生 session 格式为 **v3+** 即开放，能力经 capability 声明；真正不兼容时以明确错误返回，不再因 pi 小版本升级而整体禁用。
 - 修改请求先落盘、只发送一次。断联和超时保留面板原状，只查询原 requestId；重连不重放修改。未决操作确认结束且可对账时，顶部才显示 **Sync current session** 图标。
 - 所有桥接通信统一使用 v2 认证连接：working/model 来自快照，文件变更和任务完成使用显式事件。旧 extension 需升级并重启终端，不再接受 v1。完成提醒尽力投递，重连不补响；提示音和任务栏行为遵守系统及 IDE 设置。开发契约见[通信协议](docs/bridge-protocol.md)。
 
@@ -104,7 +104,7 @@ pi 忙碌、首条消息无 parent，或 parent 是另一条 user/custom message
 第一份有效快照整体替换旧本地卡片，旧隐藏记录不再过滤历史，因此当前分支中以前隐藏的消息也会重新显示；草稿保留。未连接时保存的消息仅作离线缓存，Rewind/Fork 需要有效在线快照。session 解析和分支遍历由 pi 公开 SessionManager API 完成，经现有 bridge 提供给面板。
 
 验证入口：`node --test tests/bridge-extension.test.mjs`、Gradle `test`，以及显式运行的
-`PI_BINARY=/path/to/pi python3 tests/bridge-tui-smoke.py`（真实 pi 1.5.0 PTY smoke，覆盖 rewind 与 fork 的运行时替换）。
+`PI_BINARY=/path/to/pi python3 tests/bridge-tui-smoke.py`（真实 pi 1.5.x PTY smoke，覆盖 rewind 与 fork 的运行时替换）。
 CI 手动触发可勾选 `tui_smoke`；extension 单测与 Gradle 单测在每次构建自动运行。
 安装按资源全文比较更新，新 Terminal 或 pi `/reload` 后加载。
 
@@ -137,7 +137,7 @@ CI 手动触发可勾选 `tui_smoke`；extension 单测与 Gradle 单测在每�
 ```bash
 node --test tests/bridge-extension.test.mjs   # 打包资源和故障契约
 ./gradlew test         # JVM 协议/投影/提交契约
-PI_BINARY=/path/to/pi python3 tests/bridge-tui-smoke.py  # 显式执行真实 pi 1.5.0 PTY smoke
+PI_BINARY=/path/to/pi python3 tests/bridge-tui-smoke.py  # 显式执行真实 pi 1.5.x PTY smoke
 ./gradlew build        # 验证
 ./gradlew runIde       # 沙箱 IDE
 ./gradlew buildPlugin  # 可分发 zip

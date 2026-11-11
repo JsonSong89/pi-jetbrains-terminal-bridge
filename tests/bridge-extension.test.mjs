@@ -10,27 +10,28 @@ import assert from 'node:assert/strict';
 
 // Run the packaged artifact. Only the host-provided version import and build placeholder change.
 const source = readFileSync(new URL('../src/main/resources/bridge/pi-launcher-bridge.ts', import.meta.url), 'utf8')
-  .replace('import { VERSION as PI_VERSION } from "@earendil-works/pi-coding-agent";', 'const PI_VERSION = "1.5.0";')
-  .replace('@EXTENSION_VERSION@', '10').replace('export default function (pi)', 'function install(pi)');
+  .replace('import { VERSION as PI_VERSION } from "@earendil-works/pi-coding-agent";', 'const PI_VERSION = "__PI_VERSION__";')
+  .replace('@EXTENSION_VERSION@', '12').replace('export default function (pi)', 'function install(pi)');
 const plain = v => JSON.parse(JSON.stringify(v));
 const message = (id, parentId, role, content) => ({ id, parentId, type: 'message', message: { role, content, timestamp: 1 } });
 const branch = [message('u1', null, 'user', 'one'), message('a1', 'u1', 'assistant', 'reply'),
   message('u2', 'a1', 'user', 'two'), message('call', 'u2', 'assistant', 'tool call'),
   message('tool', 'call', 'toolResult', 'tool result'), message('a2', 'tool', 'assistant', 'reply two'),
   message('u3', 'a2', 'user', 'three'), message('a3', 'u3', 'assistant', 'reply three')];
-function module(env = {}, nativeNet = net, timers = { setTimeout, clearTimeout, setInterval, clearInterval }) {
+function module(env = {}, nativeNet = net, timers = { setTimeout, clearTimeout, setInterval, clearInterval }, piVersion = '1.5.0') {
   const sandbox = vm.createContext({ Buffer, ...timers,
     process: { env: { PI_LAUNCHER_PORT: '1', PI_LAUNCHER_TOKEN: 'test', PI_LAUNCHER_TAB_KEY: 'tab-1', ...env },
       pid: process.pid, platform: process.platform, kill: process.kill },
     require: name => ({ 'node:fs/promises': fs, 'node:path': path, 'node:crypto': crypto, 'node:net': nativeNet })[name],
   });
-  return vm.runInContext(source + '\n({PiAdapter, OperationRuntime, OperationJournal, Transport, install, hash, frame});', sandbox);
+  const code = source.replace('"__PI_VERSION__"', JSON.stringify(piVersion));
+  return vm.runInContext(code + '\n({PiAdapter, OperationRuntime, OperationJournal, Transport, install, hash, frame});', sandbox);
 }
 async function harness(t, entries = branch, options = {}) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'pi-bridge-contract-'));
   const cleanup = [];
   t.after(async () => { for (const close of cleanup.reverse()) await close(); await fs.rm(directory, { recursive: true, force: true }); });
-  const api = module({ PI_LAUNCHER_JOURNAL_DIR: path.join(directory, 'installed'), ...options.env });
+  const api = module({ PI_LAUNCHER_JOURNAL_DIR: path.join(directory, 'installed'), ...options.env }, net, undefined, options.piVersion);
   const commands = new Map(), handlers = new Map(), sent = [], calls = [];
   let active = structuredClone(entries), sessionId = 'session-1', editor = options.editor ?? 'unsent TUI draft 🐈', busy = false, modelPrompts = 0;
   const ctx = { mode: 'tui', model: { provider: 'test', id: 'model' },
@@ -247,6 +248,22 @@ test('normal rewind confirms the actual complete branch and preserves editor', a
   assert.deepEqual(result.context.afterSnapshot.branch.entries.map(e => e.id), ['u1', 'a1']);
   assert.equal(h.editor(), 'unsent TUI draft 🐈'); assert.equal(h.modelPrompts(), 0);
 });
+test('operation capabilities follow the probe, not an exact pi version string', async t => {
+  for (const piVersion of ['1.5.1', '1.5.2', '1.6.0']) {
+    const h = await harness(t, branch, { piVersion });
+    const req = h.request(); await h.runtime.enqueue(req);
+    const result = await h.waitResult(req.id);
+    assert.equal(result.status, 'succeeded'); assert.equal(result.effect, 'applied');
+    assert.equal(result.context.afterSnapshot.source.piVersion, piVersion);
+  }
+  // An older/unrecognized session format still fails closed instead of guessing.
+  const h = await harness(t);
+  h.ctx.sessionManager.getHeader = () => ({ version: 2, id: 'session-1' });
+  const req = h.request(); await h.runtime.enqueue(req);
+  const result = await h.waitResult(req.id);
+  assert.equal(result.status, 'failed'); assert.equal(result.effect, 'none'); assert.equal(result.error.code, 'UNSUPPORTED');
+  assert.deepEqual(h.calls, []);
+});
 test('duplicate id executes once; changed parameters return ID_CONFLICT', async t => {
   const h = await harness(t), req = h.request();
   await h.runtime.enqueue(req); await h.waitResult(req.id);
@@ -453,7 +470,7 @@ test('retired control commands remain blocked from the model without any legacy 
   }
 });
 
-async function installedBridge(t) {
+async function installedBridge(t, options = {}) {
   const frames = [], sockets = [];
   let autoWelcome = true;
   const server = net.createServer(socket => {
@@ -471,7 +488,7 @@ async function installedBridge(t) {
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(() => { sockets.forEach(s => s.destroy()); server.close(); });
-  const h = await harness(t, branch, { env: { PI_LAUNCHER_PORT: String(server.address().port) } });
+  const h = await harness(t, branch, { ...options, env: { ...options.env, PI_LAUNCHER_PORT: String(server.address().port) } });
   h.api.install(h.pi);
   t.after(() => h.emit('session_shutdown'));
   const waitFor = async predicate => {
@@ -485,6 +502,14 @@ async function installedBridge(t) {
   await waitFor(() => frames.some(f => f.event === 'session.snapshot'));
   return { ...h, frames, sockets, waitFor, setAutoWelcome: value => { autoWelcome = value; } };
 }
+
+test('hello advertises operation capabilities for newer pi patch releases', async t => {
+  const h = await installedBridge(t, { piVersion: '1.5.2' });
+  const hello = h.frames.find(f => f.type === 'hello');
+  assert.equal(hello.piVersion, '1.5.2');
+  assert.deepEqual(Object.keys(hello.capabilities).sort(),
+    ['conversation.forkAtTurn', 'conversation.rewind', 'operation.reconcile', 'session.snapshot']);
+});
 
 test('installed extension sends one v2 completion per run, preserves files and observes model and working via snapshots', async t => {
   const h = await installedBridge(t);

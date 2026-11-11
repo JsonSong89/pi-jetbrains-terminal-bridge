@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Opt-in isolated pi 1.5.0 PTY smoke for rewind and fork; never RPC or model input.
+"""Opt-in isolated pi 1.5.x PTY smoke for rewind and fork; never RPC or model input.
 Run: PI_BINARY=/path/to/pi python3 tests/bridge-tui-smoke.py
 """
 import fcntl
@@ -54,7 +54,7 @@ def accept_bridge(server):
         peer = BridgePeer(client)
         hello = peer.receive()
         if hello.get("v") == 2 and hello.get("type") == "hello":
-            assert hello["piVersion"] == "1.5.0", hello.get("piVersion")
+            assert isinstance(hello.get("piVersion"), str) and hello["piVersion"], hello.get("piVersion")
             peer.send(type="welcome", protocolVersion=2, connectionId=str(uuid.uuid4()))
             return peer, hello
         peer.close()
@@ -70,7 +70,7 @@ def run_smoke(binary, operation):
         agent.mkdir()
         (agent / "settings.json").write_text(json.dumps({"quietStartup": True}))
         extension = root / "bridge.ts"
-        extension.write_text(resource.read_text().replace("@EXTENSION_VERSION@", "9"))
+        extension.write_text(resource.read_text().replace("@EXTENSION_VERSION@", "12"))
         evidence = root / "evidence.jsonl"
         guard = root / "guard.ts"
         guard.write_text('''import { appendFileSync } from "node:fs";
@@ -191,7 +191,7 @@ export default function(pi) {
                 assert observed and all(item.get("editor") == draft and "unexpectedInput" not in item and "modelRun" not in item for item in observed), observed
                 if operation == "fork":
                     assert any(item.get("reason") == "fork" for item in observed), observed
-                print(f"PASS: pi 1.5.0 TUI {operation}; confirmed branch, editor preserved, zero prompt/model events")
+                print(f"PASS: pi {hello['piVersion']} TUI {operation}; confirmed branch, editor preserved, zero prompt/model events")
             finally:
                 if peer:
                     peer.close()
@@ -209,7 +209,7 @@ export default function(pi) {
 def main():
     binary = os.environ.get("PI_BINARY") or shutil.which("pi")
     if not binary:
-        raise RuntimeError("Set PI_BINARY to the supported pi 1.5.0 CLI")
+        raise RuntimeError("Set PI_BINARY to a pi 1.5.x CLI")
     for operation in ["rewind", "fork"]:
         run_smoke(binary, operation)
 

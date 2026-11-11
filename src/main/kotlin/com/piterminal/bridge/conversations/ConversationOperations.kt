@@ -21,7 +21,7 @@ class ConversationOperations(private val project: Project, private val service: 
         val snapshot = bridge.snapshot(tab)
         if (bridge.locked(tab)) return warn("A prior operation is unresolved. Its original request is being queried; keep editing your draft or reconcile a confirmed result.")
         if (PiBridgeServer.getInstance(project).connection(tab)?.supports("conversation.rewind") != true || snapshot?.usable != true) {
-            return warn("Rewind needs a ready bridge and verified pi 1.5.0. Restart the Pi terminal after updating the extension.")
+            return warn("Rewind needs a ready bridge with verified TUI command dispatch. Restart the Pi terminal after updating the extension.")
         }
         if (message.entryId == null || message.sessionId != snapshot.sessionId || c.piSessionId != snapshot.sessionId ||
             snapshot.users().none { it.id == message.entryId }) return warn("This cached message is not on the current Pi branch. Wait for session synchronization before rewinding.")

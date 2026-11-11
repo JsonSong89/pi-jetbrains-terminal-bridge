@@ -1,7 +1,7 @@
-# Pi ↔ IDEA 桥接实现与开发约定（0.4.0 开发基线）
+# Pi ↔ IDEA 桥接实现与开发约定（0.4.1 开发基线）
 
-> 0.4.0 发布前已通过 dev 内测与 CI 构建；本文还描述后续的纯 v2 与完成提醒改动，本轮 Node 契约及真实 TUI Fork/Rewind 验证通过，IDE 端验收与 CI 编译尚待执行。
-> 插件版本 0.4.0；托管 extension VERSION=11。正式 wire 契约见 [bridge-protocol.md](../bridge-protocol.md)，实施决策见 [双向操作通道与回退确认](../plans/2026-11-04-2114——双向操作通道与回退确认.md)。
+> 0.4.0 已发布；0.4.1 修正 pi 小版本升级导致能力被整体禁用的问题（不再锁定精确版本号），并已用真实 pi 1.5.2 跑通 Node 契约与 TUI Rewind/Fork smoke；IDE 端验收与 CI 编译尚待执行。
+> 插件版本 0.4.1；托管 extension VERSION=12。正式 wire 契约见 [bridge-protocol.md](../bridge-protocol.md)，实施决策见 [双向操作通道与回退确认](../plans/2026-11-04-2114——双向操作通道与回退确认.md)。
 > 公共通道、Rewind、ForkWorkflow 及全部事件统一使用 v2；旧 v1 短连接已移除。完成提醒改为独立的系统声音与后台应用图标提醒；见[实施方案](../plans/2026-11-10-1726——任务完成提醒与纯v2协议迁移.md)。
 
 ## 1. 产品结构
@@ -45,7 +45,7 @@ extension 仍是单文件资源 `src/main/resources/bridge/pi-launcher-bridge.ts
 
 启动注入 `PI_LAUNCHER_PORT/TOKEN/TAB_KEY`，新增 `PI_LAUNCHER_JOURNAL_DIR`。缺少前三个变量的 pi 不注册命令或启动后台资源。缺少日志目录时不能开放修改能力。
 
-extension 在 `session_start` 之后派发唯一内部命令完成 probe，再发 v2 hello。修改基线锁定 pi **1.5.0** / session v3；不支持的版本不声明 rewind。内部保留前缀有 input 拦截，过期的 `/bridge-rewind` 也被消费并提示，不进入模型。
+extension 在 `session_start` 之后派发唯一内部命令完成 probe，再发 v2 hello。能力门控不绑定精确 pi 版本号：probe 通过且 session 格式为 v3+ 即声明 rewind/fork，`piVersion` 仅用于诊断；实际 API 不兼容时以 UNSUPPORTED / POSTCONDITION_FAILED 显式失败。内部保留前缀有 input 拦截，过期的 `/bridge-rewind` 也被消费并提示，不进入模型。
 
 - hello/welcome 认证后身份固定在连接上。
 - 握手 5s；心跳 5s；15s 无响应断开；重连退避 0.5–10s 并带抖动。
@@ -155,7 +155,7 @@ ForkWorkflow 已使用通用交接：只捕获 ticket 配置和原生核验证�
 
 - `node --test tests/bridge-extension.test.mjs`：执行打包资源，覆盖 registry、快照、busy/取消/歧义、重复 ID、日志/断联/重启、执行结束证据、handoff、背压/framing、v2 完成事件及重连不补响行为。
 - `./gradlew test`：JVM framing、原生快照、旧缓存替换、草稿/视图提交前置条件，以及完整 turn / 副本身份 / fork 提交策略。
-- `PI_BINARY=/path/to/pi python3 tests/bridge-tui-smoke.py`：隔离目录和配置，用 PTY 启动真实 pi 1.5.0，核验 probe、rewind、CLI 副本内 fork / 新实例交接、TUI 编辑器及零 prompt/model 事件。只操作临时 fixture，不使用 RPC。
+- `PI_BINARY=/path/to/pi python3 tests/bridge-tui-smoke.py`：隔离目录和配置，用 PTY 启动真实 pi 1.5.x，核验 probe、rewind、CLI 副本内 fork / 新实例交接、TUI 编辑器及零 prompt/model 事件。只操作临时 fixture，不使用 RPC。
 - GitHub CI 默认执行 Node 契约测试与 `test buildPlugin`；workflow_dispatch 可勾选 `tui_smoke` 安装固定 pi 版本执行真实 TUI smoke。手动 dev 构建不发布。
 
-本轮已运行 Node 契约测试及真实 pi 1.5.0 TUI smoke（Fork/Rewind、编辑器保真、零模型请求）；未运行本地 Gradle。JVM 测试/编译仍交给 CI，声音和图标提醒仍需 Windows IDEA/JBR 实机验收。发布前仍需真实长会话资源预算、IDE 断联/重开与本地提交崩溃窗口、用户实际发行版及 label 适配验收。
+本轮已运行 Node 契约测试及真实 pi 1.5.x TUI smoke（Fork/Rewind、编辑器保真、零模型请求）；未运行本地 Gradle。JVM 测试/编译仍交给 CI，声音和图标提醒仍需 Windows IDEA/JBR 实机验收。发布前仍需真实长会话资源预算、IDE 断联/重开与本地提交崩溃窗口、用户实际发行版及 label 适配验收。

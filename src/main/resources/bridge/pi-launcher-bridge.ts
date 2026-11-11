@@ -29,6 +29,11 @@ const frame = (type, fields = {}) => ({ v: 2, type, ...fields });
 const error = (code, message, effect = "none") => Object.assign(new Error(message), { code, effect });
 const validId = id => typeof id === "string" && /^[A-Za-z0-9-]{1,128}$/.test(id);
 const enabled = () => !!PORT && !!TOKEN && !!TAB_KEY;
+// pi patch/minor releases evolve; the public command/session API is the contract,
+// not an exact version string. The probe decides whether dispatch works, the
+// session format major stays checked, and real incompatibilities surface as
+// operation errors instead of silently disabling every capability up front.
+const supportedSession = header => Number.isSafeInteger(header?.version) && header.version >= 3;
 const readSession = ctx => {
   const sm = ctx.sessionManager;
   if (typeof sm?.getBranch !== "function" || typeof sm?.getLeafId !== "function" || typeof ctx.isIdle !== "function") throw error("UNSUPPORTED", "Missing public snapshot APIs");
@@ -318,7 +323,7 @@ class PiAdapter {
   }
   preflight(request, ctx) {
     const current = this.capture(ctx);
-    if (!this.probePassed || PI_VERSION !== "1.5.0" || current.session.header?.version !== 3) throw error("UNSUPPORTED", "Operation requires verified pi 1.5.0 TUI command dispatch");
+    if (!this.probePassed || !supportedSession(current.session.header)) throw error("UNSUPPORTED", "Operation requires verified TUI command dispatch and session format v3+");
     if (!current.state.idle || current.state.pendingMessages) throw error("BUSY", "Pi is busy; no operation was queued");
     if (request.startBefore !== undefined && (!Number.isFinite(request.startBefore) || Date.now() > request.startBefore)) throw error("STALE_CONTEXT", "Operation start deadline expired");
     if (current.consistency !== "stable" || request.context?.sessionId !== current.session.id ||
@@ -376,7 +381,7 @@ class PiAdapter {
         canonical(actualEntries.slice(0, expectedEntries.length)) === canonical(expectedEntries) &&
         actualEntries.slice(expectedEntries.length).every(e => ["session_info", "model_change", "thinking_level_change"].includes(e.type));
       const valid = ctx.mode === "tui" && after.consistency === "stable" && after.state.idle && !after.state.pendingMessages &&
-        after.session.header?.version === 3 && typeof after.session.id === "string" && after.session.id.length > 0 &&
+        supportedSession(after.session.header) && typeof after.session.id === "string" && after.session.id.length > 0 &&
         after.session.header.id === after.session.id && after.session.id !== expected.session.id &&
         after.session.file && after.session.file !== expected.session.file && after.session.header?.parentSession === expected.session.file &&
         matchesBranch && ctx.ui.getEditorText() === expected.editor;
@@ -657,8 +662,8 @@ export default function (pi) {
       catch (_e) { /* Read-only transport remains useful; never execute with an unavailable journal. */ }
       if (closed) { await journal.close().catch(() => {}); return; }
       const capabilities = adapter.probePassed ? { "session.snapshot": [1] } : {};
-      if (writable && adapter.probePassed) capabilities["operation.reconcile"] = [1];
-      if (writable && adapter.probePassed && PI_VERSION === "1.5.0") {
+      if (writable && adapter.probePassed) {
+        capabilities["operation.reconcile"] = [1];
         capabilities["conversation.rewind"] = [1]; capabilities["conversation.forkAtTurn"] = [1];
       }
       transport = new Transport(() => frame("hello", { token: TOKEN, tabKey: TAB_KEY, runtimeId,
