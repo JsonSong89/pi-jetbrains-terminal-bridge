@@ -32,7 +32,7 @@ pi 侧 extension 源码是资源文件 `src/main/resources/bridge/pi-launcher-br
 ## 核心设计
 
 - **通信协议正式契约：`docs/bridge-protocol.md`（v2 双向操作通道：request/response/query/ack/event + operation journal + handoff ticket）**。`docs/tasks/` 与 `docs/plans/` 是实施记录与决策档案；改协议先改 `bridge-protocol.md`，再同步其他文档。
-- v1 短连接事件信封 `{v, seq, type, tabKey, token, data}`（seq 按 `(tabKey, type)` 分域去重、token 校验）只保留给 working/model/file 通知与旧 extension 的 session 绑定；v2 接管过的 tab 不再响应 v1 的换绑/停止事件。
+- 桥接仅使用认证 v2 连接；working/model 来自快照，文件变更与任务完成使用 v2 event。旧 v1 短连接不再接收，旧 extension 需升级并重启终端；完成提醒不参与 Fork/Rewind 的操作状态、日志或 handoff。
 - 以下规则依然有效（详见 docs/tasks/）：
 
 - 会话 id 模型：conversation 有稳定 `id`（tabKey / 主键）+ `piSessionId`（当前绑定的 pi 会话，`/new` 等操作会换绑它；换绑时旧会话归档为 closed 条目，可复活）

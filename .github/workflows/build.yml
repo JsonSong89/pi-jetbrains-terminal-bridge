@@ -78,10 +78,10 @@ jobs:
       - name: Test bridge extension contracts
         run: node --test tests/bridge-extension.test.mjs
 
-      - name: Smoke test real pi 1.5.0 TUI
+      - name: Smoke test real pi 1.5.2 TUI
         if: github.event_name == 'workflow_dispatch' && inputs.tui_smoke
         run: |
-          npm install --prefix "$RUNNER_TEMP/pi-bridge-smoke" @earendil-works/pi-coding-agent@1.5.0
+          npm install --prefix "$RUNNER_TEMP/pi-bridge-smoke" @earendil-works/pi-coding-agent@1.5.2
           PI_BINARY="$RUNNER_TEMP/pi-bridge-smoke/node_modules/.bin/pi" python3 tests/bridge-tui-smoke.py
 
       - name: Set up JDK 21

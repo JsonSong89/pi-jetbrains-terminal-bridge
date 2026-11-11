@@ -7,6 +7,7 @@ import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.project.Project
 import com.piterminal.bridge.conversations.PiConversationService
+import com.piterminal.bridge.services.PiFinishNotifier
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
@@ -243,10 +244,11 @@ class BridgeOperations(private val project: Project) : Disposable {
     fun receive(connection: BridgeConnection, frame: JsonObject) = execute {
         try {
             when (BridgeProtocol.string(frame, "type")) {
-                "event" -> {
-                    val snapshot = frame.getAsJsonObject("snapshot")
-                    if (snapshot != null) acceptSnapshot(connection, snapshot)
-                    else if (BridgeProtocol.string(frame, "event") == "context_unavailable") contextUnavailable(connection.tabKey, frame.getAsJsonObject("error"))
+                "event" -> when (BridgeProtocol.string(frame, "event")) {
+                    "session.snapshot" -> frame.getAsJsonObject("snapshot")?.let { acceptSnapshot(connection, it) }
+                    "context_unavailable" -> contextUnavailable(connection.tabKey, frame.getAsJsonObject("error"))
+                    "agent.finished", "file.modified" -> deliverNotificationEvent(connection, frame.deepCopy())
+                    else -> Unit
                 }
                 "response" -> {
                     val id = BridgeProtocol.string(frame, "id") ?: return@execute
@@ -294,6 +296,21 @@ class BridgeOperations(private val project: Project) : Disposable {
         } catch (_: Exception) {
             // Invalid snapshots or failed disk writes cannot cause business commits/acks.
             connection.close()
+        }
+    }
+
+    /** Notification events never enter operation records, locks or result application. */
+    private fun deliverNotificationEvent(connection: BridgeConnection, event: JsonObject) = onEdt {
+        // Recheck after EDT scheduling: an old runtime may have been replaced meanwhile.
+        if (PiBridgeServer.getInstance(project).connection(connection.tabKey)?.id != connection.id) return@onEdt
+        val service = PiConversationService.getInstance(project)
+        if (service.get(connection.tabKey) == null) return@onEdt
+        when (BridgeProtocol.string(event, "event")) {
+            "agent.finished" -> PiFinishNotifier.getInstance(project).finished(connection.tabKey, connection.runtimeId, event)
+            "file.modified" -> BridgeProtocol.string(event, "path")?.takeIf { it.isNotBlank() }?.let {
+                service.onBridgeFileModified(connection.tabKey, it)
+            }
+            else -> Unit
         }
     }
 

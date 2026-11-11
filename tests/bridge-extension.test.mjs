@@ -10,27 +10,28 @@ import assert from 'node:assert/strict';
 
 // Run the packaged artifact. Only the host-provided version import and build placeholder change.
 const source = readFileSync(new URL('../src/main/resources/bridge/pi-launcher-bridge.ts', import.meta.url), 'utf8')
-  .replace('import { VERSION as PI_VERSION } from "@earendil-works/pi-coding-agent";', 'const PI_VERSION = "1.5.0";')
-  .replace('@EXTENSION_VERSION@', '10').replace('export default function (pi)', 'function install(pi)');
+  .replace('import { VERSION as PI_VERSION } from "@earendil-works/pi-coding-agent";', 'const PI_VERSION = "__PI_VERSION__";')
+  .replace('@EXTENSION_VERSION@', '12').replace('export default function (pi)', 'function install(pi)');
 const plain = v => JSON.parse(JSON.stringify(v));
 const message = (id, parentId, role, content) => ({ id, parentId, type: 'message', message: { role, content, timestamp: 1 } });
 const branch = [message('u1', null, 'user', 'one'), message('a1', 'u1', 'assistant', 'reply'),
   message('u2', 'a1', 'user', 'two'), message('call', 'u2', 'assistant', 'tool call'),
   message('tool', 'call', 'toolResult', 'tool result'), message('a2', 'tool', 'assistant', 'reply two'),
   message('u3', 'a2', 'user', 'three'), message('a3', 'u3', 'assistant', 'reply three')];
-function module(env = {}, nativeNet = net, timers = { setTimeout, clearTimeout, setInterval, clearInterval }) {
+function module(env = {}, nativeNet = net, timers = { setTimeout, clearTimeout, setInterval, clearInterval }, piVersion = '1.5.0') {
   const sandbox = vm.createContext({ Buffer, ...timers,
     process: { env: { PI_LAUNCHER_PORT: '1', PI_LAUNCHER_TOKEN: 'test', PI_LAUNCHER_TAB_KEY: 'tab-1', ...env },
       pid: process.pid, platform: process.platform, kill: process.kill },
     require: name => ({ 'node:fs/promises': fs, 'node:path': path, 'node:crypto': crypto, 'node:net': nativeNet })[name],
   });
-  return vm.runInContext(source + '\n({PiAdapter, OperationRuntime, OperationJournal, Transport, install, hash, frame});', sandbox);
+  const code = source.replace('"__PI_VERSION__"', JSON.stringify(piVersion));
+  return vm.runInContext(code + '\n({PiAdapter, OperationRuntime, OperationJournal, Transport, install, hash, frame});', sandbox);
 }
 async function harness(t, entries = branch, options = {}) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'pi-bridge-contract-'));
   const cleanup = [];
   t.after(async () => { for (const close of cleanup.reverse()) await close(); await fs.rm(directory, { recursive: true, force: true }); });
-  const api = module(options.env);
+  const api = module({ PI_LAUNCHER_JOURNAL_DIR: path.join(directory, 'installed'), ...options.env }, net, undefined, options.piVersion);
   const commands = new Map(), handlers = new Map(), sent = [], calls = [];
   let active = structuredClone(entries), sessionId = 'session-1', editor = options.editor ?? 'unsent TUI draft 🐈', busy = false, modelPrompts = 0;
   const ctx = { mode: 'tui', model: { provider: 'test', id: 'model' },
@@ -80,6 +81,7 @@ async function harness(t, entries = branch, options = {}) {
     throw new Error('No terminal result for ' + id);
   };
   return { api, adapter, journal, runtime, ctx, sent, calls, request, waitResult, commands, pi, directory, cleanup,
+    emit: async (name, event = {}) => { for (const handler of handlers.get(name) ?? []) await handler(event, commandContext); },
     current: () => structuredClone(active), editor: () => editor, modelPrompts: () => modelPrompts,
     setEditor: value => { editor = value; },
     setContext: value => { commandContext = value; }, setBusy: value => { busy = value; }, setSession: id => { sessionId = id; }, setBranch: value => { active = value; } };
@@ -245,6 +247,22 @@ test('normal rewind confirms the actual complete branch and preserves editor', a
   assert.deepEqual(h.calls, ['a1']); assert.deepEqual(h.current().map(e => e.id), ['u1', 'a1']);
   assert.deepEqual(result.context.afterSnapshot.branch.entries.map(e => e.id), ['u1', 'a1']);
   assert.equal(h.editor(), 'unsent TUI draft 🐈'); assert.equal(h.modelPrompts(), 0);
+});
+test('operation capabilities follow the probe, not an exact pi version string', async t => {
+  for (const piVersion of ['1.5.1', '1.5.2', '1.6.0']) {
+    const h = await harness(t, branch, { piVersion });
+    const req = h.request(); await h.runtime.enqueue(req);
+    const result = await h.waitResult(req.id);
+    assert.equal(result.status, 'succeeded'); assert.equal(result.effect, 'applied');
+    assert.equal(result.context.afterSnapshot.source.piVersion, piVersion);
+  }
+  // An older/unrecognized session format still fails closed instead of guessing.
+  const h = await harness(t);
+  h.ctx.sessionManager.getHeader = () => ({ version: 2, id: 'session-1' });
+  const req = h.request(); await h.runtime.enqueue(req);
+  const result = await h.waitResult(req.id);
+  assert.equal(result.status, 'failed'); assert.equal(result.effect, 'none'); assert.equal(result.error.code, 'UNSUPPORTED');
+  assert.deepEqual(h.calls, []);
 });
 test('duplicate id executes once; changed parameters return ID_CONFLICT', async t => {
   const h = await harness(t), req = h.request();
@@ -435,11 +453,9 @@ test('framing keeps split UTF-8 and Unicode separators; reconnect does not repla
   await Promise.race([done, new Promise((_, reject) => setTimeout(() => reject(new Error('Reconnect timeout')), 5000).unref())]);
   assert.equal(observed[0].text, '你好\u2028\u2029'); assert.equal(executions, 1);
 });
-test('legacy controls are consumed without command registration; v1 notifications remain', async () => {
-  const sent = [], commands = new Map(), handlers = new Map(), notices = [];
-  const fakeNet = { connect: () => ({ setTimeout() {}, destroy() {}, end: payload => sent.push(JSON.parse(payload)),
-    on(event, callback) { if (event === 'connect') callback(); return this; } }) };
-  const api = module({}, fakeNet);
+test('retired control commands remain blocked from the model without any legacy transport', async () => {
+  const commands = new Map(), handlers = new Map(), notices = [];
+  const api = module({}, { connect() { throw new Error('Unexpected legacy connection'); } });
   api.install({ registerCommand: (name, command) => commands.set(name, command),
     on(name, handler) { if (!handlers.has(name)) handlers.set(name, []); handlers.get(name).push(handler); } });
   const ctx = { ui: { notify: (text, level) => notices.push({ text, level }) } };
@@ -449,18 +465,115 @@ test('legacy controls are consumed without command registration; v1 notification
     assert.equal(result.action, 'handled');
   }
   assert.equal(notices.length, 2);
-  const emit = async (name, event) => { for (const h of handlers.get(name) ?? []) await h(event, ctx); };
-  await emit('agent_start', {});
-  await emit('agent_end', { messages: [{ role: 'assistant', stopReason: 'error' }] });
-  await emit('agent_settled', { aborted: false });
-  assert.deepEqual(sent.findLast(m => m.type === 'agent_state').data, { state: 'idle', stopReason: 'error' });
-  await emit('agent_start', {});
-  await emit('agent_end', { messages: [{ role: 'assistant', stopReason: 'stop' }] });
-  await emit('agent_settled', { aborted: false });
-  assert.deepEqual(sent.findLast(m => m.type === 'agent_state').data, { state: 'idle' });
-  await emit('model_select', { model: { provider: 'test', id: 'model' } });
-  assert.equal(sent.findLast(m => m.type === 'model_changed').data.modelId, 'test/model');
-  await emit('session_shutdown', {});
+  for (const name of ['agent_start', 'agent_end', 'agent_settled', 'model_select', 'session_shutdown']) {
+    for (const handler of handlers.get(name) ?? []) await handler({}, ctx);
+  }
+});
+
+async function installedBridge(t, options = {}) {
+  const frames = [], sockets = [];
+  let autoWelcome = true;
+  const server = net.createServer(socket => {
+    sockets.push(socket);
+    let buffer = '';
+    socket.on('data', bytes => {
+      buffer += bytes.toString('utf8');
+      while (buffer.includes('\n')) {
+        const at = buffer.indexOf('\n'), value = JSON.parse(buffer.slice(0, at)); buffer = buffer.slice(at + 1);
+        frames.push(value);
+        if (value.type === 'hello' && autoWelcome) socket.write('{"v":2,"type":"welcome","protocolVersion":2}\n');
+        if (value.type === 'ping') socket.write('{"v":2,"type":"pong"}\n');
+      }
+    });
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => { sockets.forEach(s => s.destroy()); server.close(); });
+  const h = await harness(t, branch, { ...options, env: { ...options.env, PI_LAUNCHER_PORT: String(server.address().port) } });
+  h.api.install(h.pi);
+  t.after(() => h.emit('session_shutdown'));
+  const waitFor = async predicate => {
+    for (let i = 0; i < 600; i++) {
+      if (predicate()) return;
+      await new Promise(resolve => setTimeout(resolve, 5));
+    }
+    assert.fail('Timed out waiting for bridge evidence');
+  };
+  await h.emit('session_start');
+  await waitFor(() => frames.some(f => f.event === 'session.snapshot'));
+  return { ...h, frames, sockets, waitFor, setAutoWelcome: value => { autoWelcome = value; } };
+}
+
+test('hello advertises operation capabilities for newer pi patch releases', async t => {
+  const h = await installedBridge(t, { piVersion: '1.5.2' });
+  const hello = h.frames.find(f => f.type === 'hello');
+  assert.equal(hello.piVersion, '1.5.2');
+  assert.deepEqual(Object.keys(hello.capabilities).sort(),
+    ['conversation.forkAtTurn', 'conversation.rewind', 'operation.reconcile', 'session.snapshot']);
+});
+
+test('installed extension sends one v2 completion per run, preserves files and observes model and working via snapshots', async t => {
+  const h = await installedBridge(t);
+  const finishes = () => h.frames.filter(f => f.event === 'agent.finished');
+  await h.emit('agent_settled'); // startup idle is not a completed run
+  h.setBusy(true); await h.emit('agent_start');
+  await h.waitFor(() => h.frames.some(f => f.snapshot?.state.idle === false));
+  await h.emit('tool_result', { toolName: 'write', input: { path: '/one' } });
+  await h.emit('tool_result', { toolName: 'edit', input: { edits: [{ path: '/two' }, { path: '/three' }] } });
+  await h.emit('message_end');
+  assert.equal(finishes().length, 0);
+  await h.emit('agent_end', { messages: [{ role: 'assistant', stopReason: 'error' }] });
+  h.setBusy(false); await h.emit('agent_settled'); await h.emit('agent_settled');
+  await h.waitFor(() => finishes().length === 1);
+  assert.equal(finishes()[0].outcome, 'error'); assert.equal(finishes()[0].sessionId, 'session-1');
+  const firstId = finishes()[0].runId;
+  assert.ok(firstId);
+  await h.emit('agent_start');
+  await h.emit('agent_end', { messages: [{ role: 'assistant', stopReason: 'stop' }] });
+  await h.emit('agent_settled');
+  await h.emit('agent_start'); await h.emit('agent_settled', { aborted: true });
+  h.ctx.model = { provider: 'test', id: 'changed' }; await h.emit('model_select');
+  await h.waitFor(() => h.frames.some(f => f.snapshot?.state.model === 'test/changed'));
+  assert.deepEqual(finishes().map(f => f.outcome), ['error', 'completed', 'aborted']);
+  assert.equal(new Set(finishes().map(f => f.runId)).size, 3);
+  assert.deepEqual(h.frames.filter(f => f.event === 'file.modified').map(f => f.path), ['/one', '/two', '/three']);
+  assert.ok(h.frames.every(f => f.v === 2));
+  assert.equal(h.sockets.length, 1); // no short-lived v1 sender
+  assert.equal(h.modelPrompts(), 0);
+});
+
+test('completion during reconnect is not queued or synthesized from the reconnect snapshot', async t => {
+  const h = await installedBridge(t);
+  h.setAutoWelcome(false); h.sockets[0].destroy();
+  await h.waitFor(() => h.frames.filter(f => f.type === 'hello').length === 2);
+  await h.emit('agent_start'); await h.emit('agent_settled');
+  h.sockets.at(-1).write('{"v":2,"type":"welcome","protocolVersion":2}\n');
+  const before = h.frames.filter(f => f.event === 'session.snapshot').length;
+  await h.waitFor(() => h.frames.filter(f => f.event === 'session.snapshot').length > before);
+  assert.equal(h.frames.filter(f => f.event === 'agent.finished').length, 0);
+  await h.emit('agent_start'); await h.emit('agent_settled');
+  await h.waitFor(() => h.frames.some(f => f.event === 'agent.finished'));
+  assert.equal(h.frames.filter(f => f.event === 'agent.finished').length, 1);
+});
+
+test('a notification send failure does not fail the pi callback or prevent a subsequent v2 rewind', async t => {
+  const h = await installedBridge(t);
+  const send = h.api.Transport.prototype.send;
+  h.api.Transport.prototype.send = function(value) {
+    if (value.event === 'agent.finished') throw new Error('Notification unavailable');
+    return send.call(this, value);
+  };
+  await h.emit('agent_start'); await h.emit('agent_settled');
+  const snapshotId = crypto.randomUUID();
+  h.sockets[0].write(JSON.stringify({ v: 2, type: 'request', id: snapshotId, method: 'session.snapshot', methodVersion: 1, params: {}, context: {} }) + '\n');
+  await h.waitFor(() => h.frames.some(f => f.id === snapshotId && f.status === 'succeeded'));
+  const snapshot = h.frames.find(f => f.id === snapshotId && f.status === 'succeeded').context.currentSnapshot;
+  const id = crypto.randomUUID();
+  h.sockets[0].write(JSON.stringify({ v: 2, type: 'request', id, method: 'conversation.rewind', methodVersion: 1,
+    params: { targetEntryId: 'u2' }, context: { sessionId: snapshot.session.id, observedSnapshotId: snapshot.snapshotId } }) + '\n');
+  await h.waitFor(() => h.frames.some(f => f.id === id && ['succeeded', 'failed', 'cancelled'].includes(f.status)));
+  assert.equal(h.frames.findLast(f => f.id === id).status, 'succeeded');
+  assert.deepEqual(h.calls, ['a1']); assert.equal(h.modelPrompts(), 0);
+  assert.equal(h.frames.filter(f => f.event === 'agent.finished').length, 0);
 });
 
 test('unmanaged pi registers no commands or background resources', () => {
