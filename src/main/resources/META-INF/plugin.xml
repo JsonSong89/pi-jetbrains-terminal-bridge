@@ -128,6 +128,12 @@
         ]]></description>
 
     <change-notes><![CDATA[
+    <h3>0.4.1</h3>
+    <ul>
+        <li><b>Fix: a pi patch/minor update no longer disables the bridge.</b> Rewind and Fork no longer require an exact <code>pi 1.5.0</code> version string: they open as soon as the internal command probe succeeds and the native session format is <b>v3 or newer</b>. The pi version is still reported in hello/snapshots for diagnostics, and genuine API incompatibilities now surface as explicit operation errors instead of silently disabling every control action. After upgrading pi (for example 1.5.1 / 1.5.2), restart the Pi terminal or run <code>/reload</code> so the managed extension (v12) is refreshed.</li>
+        <li><b>Completion alerts, without the balloon.</b> The finish balloon is retired and replaced by two independent opt-in switches, both off by default: play a system sound on normal completion or error in foreground and background, and request taskbar / Dock attention while the IDE is in the background. Manual aborts stay silent, nothing steals focus, and system/IDE sound and attention settings are respected.</li>
+        <li><b>All bridge events now share one v2 channel.</b> Working / model badges come from full native snapshots, while file changes and task completion use explicit authenticated events that never touch operation state or locks. The legacy short-lived v1 sender is gone, so an older installed extension must be upgraded and its terminal restarted.</li>
+    </ul>
     <h3>0.4.0</h3>
     <ul>
         <li><b>The bridge now speaks a durable v2 operation protocol.</b> Requests are journaled and sent once; a disconnect or timeout keeps the panel as-is and only queries the original operation id — reconnect never replays a modification. Fork and Rewind are real operations instead of pasted terminal commands, and the panel keeps its copy visible until pi confirms the result through a validated branch snapshot.</li>
