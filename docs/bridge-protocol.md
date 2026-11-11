@@ -148,13 +148,13 @@ source
 | method/version | 参数 | 结果与副作用 |
 |---|---|---|
 | `session.snapshot/1` | `{}` | 只读全量快照，可重新请求 |
-| `conversation.rewind/1` | `{targetEntryId}` | pi 1.5.0 / session v3；非 busy、完整稳定观察、目标 parent 安全才执行；终态含目标 id 和快照 |
+| `conversation.rewind/1` | `{targetEntryId}` | 交互式 TUI（probe 通过）/ session v3+；非 busy、完整稳定观察、目标 parent 安全才执行；终态含目标 id 和快照 |
 | `conversation.forkAtTurn/1` | `{targetEntryId,turnLeafId}` | 在独立副本内执行；完整 turn（含 tools）按原生身份匹配；`ctx.fork(position:"at",withSession)`；耐久 handoff 终态含目标 id、turn leaf、新 sessionId 与历史快照；取消/替换异常也用同一 ticket 记录 |
 | `operation.reconcile/1` | `{operationIds:[...]}`（1–128 个唯一 id） | 耐久的日志元数据操作；只在这些执行已确认结束时解除运行时锁；返回相同 id 列表和当前快照；不执行原请求、不把其未知结果改写为成功 |
 
 ForkWorkflow 的 Terminal 准备是本地业务阶段：通用 preparation reservation 先落盘，尚无 request 时不发 query；READY 后将同一 id 一次性转换为普通 request。IDE 重开后未发送 preparation 标为 not_sent，不重新启动或执行；已发送只查询原 id。目标面板在核验成功前保留完整副本。取消准备可保留副本；绑定最终会话时不归档中间副本。
 
-首版 fork 只支持持久会话且没有 label 条目。公开 pi fork 会重建 label/rechain，未实现其核验适配前执行前 UNSUPPORTED。目标 TUI 编辑器必须为空：pi 1.5.0 wrapper 会在 withSession 返回后清空 editor，不能先确认“保留非空编辑器”。源 Terminal 输入和 IDEA 草稿不受影响。启动或替换 runtime 补写的 session_info/model_change/thinking_level_change 可跟在已核验 turn 后，其他新增内容不放行。withSession 的历史快照以 `handoff-<nonce>` 标记核验采集来源；它不是连接 runtime 身份，也不作为当前快照投递，当前状态仍由新认证连接独立采集。
+首版 fork 只支持持久会话且没有 label 条目。公开 pi fork 会重建 label/rechain，未实现其核验适配前执行前 UNSUPPORTED。目标 TUI 编辑器必须为空：pi 1.5.x 的 wrapper 会在 withSession 返回后清空 editor，不能先确认“保留非空编辑器”。源 Terminal 输入和 IDEA 草稿不受影响。启动或替换 runtime 补写的 session_info/model_change/thinking_level_change 可跟在已核验 turn 后，其他新增内容不放行。withSession 的历史快照以 `handoff-<nonce>` 标记核验采集来源；它不是连接 runtime 身份，也不作为当前快照投递，当前状态仍由新认证连接独立采集。
 
 对账响应可附 `executionEnded:true`。它不是执行成功状态，也不能凭新 hello / runtimeId 改变 / lease 释放推断：必须有原 executor 返回后持久化的 `.ended` 证据、耐久终态，或已确认原进程不再存在。仍在展开的同进程 reload 回调没有上述证据时不可对账；handoff ticket 未完成时也不可对账。原日志丢失仍返回 NOT_FOUND，不产生结束证据。
 
@@ -192,11 +192,28 @@ UI 本地应用的幂等标记与业务状态一起持久化；LOCAL_CONFLICT/LO
 
 日志输出允许 id、method、状态、耗时、脱敏 session 标识及错误码；默认禁止 token、全文 params、完整 snapshot。错误弹窗不是持久执行日志。
 
-## 7. v1 兼容与演进
+## 7. v2 事件与 v1 退出
 
-现有 v1 短连接事件可继续保留；v2 操作结果不使用 v1 的 `(tabKey,type)` last-seq 去重，必须按 id 独立关联。
+认证后的通知与状态观察统一使用 v2 `event`，不接受或发送 v1 短连接事件。旧 extension 必须升级并重启终端；不能回退到 v1。连接身份提供 tabKey/runtimeId，事件不得覆盖它们。
 
-v2 接管 tab 的 session 绑定与快照后，旧 v1 session_changed/stopped 不得重复提交或归档；明确设定单一状态所有者。旧 extension 无 capability 时禁用新操作并提示升级/重启，不自动 fallback 粘贴。
+### 7.1 Agent 完成
+
+```json
+{"v":2,"type":"event","event":"agent.finished","runId":"<uuid>","sessionId":"<pi-session-id>","outcome":"completed"}
+```
+
+- `agent_start` 创建 runId；`agent_end` 只采集结束原因；`agent_settled` 发送一次事件并清除本次运行。outcome 为 `completed | error | aborted`。没有本实例的 start 不补造完成。
+- IDE 按认证 `(tabKey,runtimeId,runId)` 记忆近期事件并去重；aborted 不提醒。正常/错误结束按两个默认关闭的独立开关播放系统提示音、请求后台应用图标提醒；不发完成 balloon、不抢焦点。
+- 完成事件不是 bridge operation 结果；不得修改操作状态、日志、资源锁或 handoff。快照 idle、断连、操作终态不推断为 agent 完成。
+- 完成事件仅在已 welcome 的连接上发送，不耐久、不重放；断连时可能遗漏提醒。重连快照不补响。IDE 丢弃已退休连接的事件。
+
+### 7.2 文件、模型与生命周期
+
+```json
+{"v":2,"type":"event","event":"file.modified","path":"<file-path>"}
+```
+
+文件事件沿用 VFS 刷新/按设置打开的行为，每个路径分别处理，不按最新状态合并。模型及 working 状态来自有效 v2 snapshot；会话绑定仍走 hello、快照与既有 handoff 核验，禁止通知事件参与会话提交。终端进程退出由 Terminal 生命周期处理；断连只代表不可达，不能冒充进程停止。
 
 兼容字段增加保持 v2；未知可选字段忽略，未知原生 entry 保留。未知 method/version 明确拒绝。必需语义变化升级协议或 method 版本，不默默改变旧客户端行为。
 
@@ -213,13 +230,13 @@ v2 接管 tab 的 session 绑定与快照后，旧 v1 session_changed/stopped �
 
 新增 replacement 方法复用 handoff；多阶段流程（如新 Terminal fork）放业务 Workflow。若新增方法要求改 Transport/公共执行状态，先审查抽象边界，不直接添加特例。
 
-必须测试：accepted 不是成功；超时只 query；重复 id 不执行两次；同 id 不同参数拒绝；丢包/断联/重启不重放；取消和部分副作用；当前/历史快照不同；未知字段；超大/不完整快照；旧 v1 乱序；withSession 新旧实例顺序；TUI 编辑内容保真且零模型请求污染。
+必须测试：accepted 不是成功；超时只 query；重复 id 不执行两次；同 id 不同参数拒绝；丢包/断联/重启不重放；取消和部分副作用；当前/历史快照不同；未知字段；超大/不完整快照；v1 拒绝、完成事件去重与断连不重放；withSession 新旧实例顺序；TUI 编辑内容保真且零模型请求污染。
 
 ## 9. 规范来源与实施前校准
 
-参考本机 pi 1.5.0 的 `docs/rpc.md`、`docs/session-format.md`、`docs/extensions.md` 及对应分发/导航源码。未据此声称其他版本兼容。
+参考 pi 1.5.x（本机核对 1.5.0，并对照 1.5.1/1.5.2 变更记录）的 `docs/rpc.md`、`docs/session-format.md`、`docs/extensions.md` 及对应分发/导航源码。未据此声称其他大版本兼容。
 
-实施基线锁定为 pi **1.5.0** 的交互式 TUI 与原生 session v3。其他 pi 版本不声明 `conversation.rewind` / `conversation.forkAtTurn`，probe 未完成/失败不声明操作能力。单元契约与真实 TUI smoke 是不同验证层；未执行 smoke 不能声称真实 TUI 兼容已通过。
+能力门控不绑定精确 pi 版本号：probe 通过且原生 session 格式为 v3+ 即声明 `conversation.rewind` / `conversation.forkAtTurn`；hello 与 snapshot 中的 `piVersion` 只用于诊断，不参与放行。pi 变更导致实际 API 不兼容时，由前置/后置核验返回明确失败（UNSUPPORTED / POSTCONDITION_FAILED），而不是在启动阶段静默关闭全部能力。probe 未完成/失败仍不声明操作能力。单元契约与真实 TUI smoke 是不同验证层；未执行 smoke 不能声称真实 TUI 兼容已通过。
 
 首期参数：单帧默认 32 MiB、发送队列默认 64 MiB（最多 128 帧）、extension 待处理帧最多 128 个；IDE socket reader 等待后台消费，快照与 UI 通知分别合并。extension 以 `PI_BRIDGE_MAX_FRAME_BYTES` / `PI_BRIDGE_MAX_QUEUE_BYTES` / `PI_BRIDGE_MAX_JOURNAL_BYTES` 配置预算；IDE 以 `pi.bridge.maxFrameBytes` / `pi.bridge.maxQueueBytes` / `pi.bridge.maxJournalBytes` 系统属性配置。两端日志默认各 512 MiB。
 
@@ -227,4 +244,4 @@ IDE 日志位于 IDE system 目录的 `pi-terminal-bridge/<project-hash>/local`�
 
 snapshotId 覆盖 runtimeId、事件代数及完整原生 session/header/file/branch/公开状态；缓存最多 16 个观察凭据。采集前后对拍，不能只比较 leafId。首期 rewind 在导航前拒绝无 parent、parent 是 user 或 custom_message 的目标，避免多退或改变 TUI 编辑器；安全 parent 的未回复消息可以处理。
 
-验证入口：`node --test tests/bridge-extension.test.mjs`（真实资源的运行时/故障契约）、Gradle `test`（framing、快照、投影、业务提交前置条件）、`PI_BINARY=/path/to/pi python3 tests/bridge-tui-smoke.py`（隔离配置的 PTY + 真实 pi 1.5.0，覆盖 rewind 与 CLI 副本内 fork/withSession 交接）。CI 手动触发可勾选 `tui_smoke`；默认构建会执行 Node/JVM 契约测试。源码交付不等于这些验证已通过。
+验证入口：`node --test tests/bridge-extension.test.mjs`（真实资源的运行时/故障契约）、Gradle `test`（framing、快照、投影、业务提交前置条件）、`PI_BINARY=/path/to/pi python3 tests/bridge-tui-smoke.py`（隔离配置的 PTY + 真实 pi 1.5.x，覆盖 rewind 与 CLI 副本内 fork/withSession 交接）。CI 手动触发可勾选 `tui_smoke`；默认构建会执行 Node/JVM 契约测试。源码交付不等于这些验证已通过。
