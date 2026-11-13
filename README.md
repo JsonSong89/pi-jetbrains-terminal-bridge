@@ -34,7 +34,7 @@ It is **not** a vibe-coding cockpit. It is for people who want more control over
 - **Stay in sync with Pi's writes** — as soon as Pi finishes a write/edit tool, the IDE refreshes that file so you don't wait on the ~10s VFS poll. Optionally also open the file in the editor.
 - **Completion alerts (opt-in)**
   - system sound on normal completion or error, in the foreground and background
-  - taskbar / Dock attention while the IDE is in the background; appearance and duration follow the platform
+  - taskbar / Dock attention when that conversation's project window is not focused (another project window in the IDE counts too); appearance and duration follow the platform
   - manual aborts stay silent; no completion balloon or automatic focus change. Both new options default to off; the old balloon setting is retired.
 - **Open edited files (opt-in)** — file refresh itself is always on.
 - **Diagnostics** — Settings shows the bridge extension state and server port.
@@ -143,7 +143,7 @@ power — combine them freely.
 |---|---|
 | Model / thinking level / extra args | Passed to the `pi` CLI at launch |
 | Play a system sound | Sound on normal completion or error in foreground/background (opt-in); manual aborts stay silent. System volume and sound settings apply. |
-| Request taskbar / Dock attention | Background completion/error attention (opt-in); appearance and duration follow OS/IDE settings. |
+| Request taskbar / Dock attention | Attention when that project's window is not focused, even if another project window in the same IDE is (opt-in); appearance and duration follow OS/IDE settings. |
 | Open files modified by Pi | Also open the file in the editor after a write (opt-in). VFS refresh is always on. |
 | Bridge diagnostics | Read-only: extension state + server port |
 

@@ -2,7 +2,7 @@
 
 > 0.4.0 已发布；0.4.1 修正 pi 小版本升级导致能力被整体禁用的问题（不再锁定精确版本号），并已用真实 pi 1.5.2 跑通 Node 契约与 TUI Rewind/Fork smoke；IDE 端验收与 CI 编译尚待执行。
 > 插件版本 0.4.1；托管 extension VERSION=12。正式 wire 契约见 [bridge-protocol.md](../bridge-protocol.md)，实施决策见 [双向操作通道与回退确认](../plans/2026-11-04-2114——双向操作通道与回退确认.md)。
-> 公共通道、Rewind、ForkWorkflow 及全部事件统一使用 v2；旧 v1 短连接已移除。完成提醒改为独立的系统声音与后台应用图标提醒；见[实施方案](../plans/2026-11-10-1726——任务完成提醒与纯v2协议迁移.md)。
+> 公共通道、Rewind、ForkWorkflow 及全部事件统一使用 v2；旧 v1 短连接已移除。完成提醒改为独立的系统声音与窗口级应用图标提醒（按会话所属项目窗口判断，而非整个 IDE 是否在前台）；见[实施方案](../plans/2026-11-10-1726——任务完成提醒与纯v2协议迁移.md)。
 
 ## 1. 产品结构
 
@@ -57,6 +57,8 @@ extension 在 `session_start` 之后派发唯一内部命令完成 probe，再�
 仅接收认证后的 v2 事件；模型与 working 状态来自完整有效快照，文件变更通过 `file.modified` 逐条处理路径。会话绑定继续使用既有快照及 handoff 核验，终端停止由 Terminal 生命周期处理；断连不冒充进程停止。
 
 完成提醒使用 `agent_start` 分配 runId、`agent_settled` 发送的 `agent.finished`，按认证 tab/runtime/runId 去重；不从快照 idle 或 Fork/Rewind 的终态推断。默认关闭的声音与图标开关互相独立；正常完成/错误结束提醒、主动中止静默，不再弹完成 balloon。事件不耐久、不重放、不进入操作日志和业务提交。
+
+图标提醒按**该会话所属项目窗口**判断，而不是整个 IDE 进程的活跃状态：同一 IDE 打开多个项目窗口时，只有项目窗口本身（或其对话框链）拥有键盘焦点才算前台，另一个项目在前台不会吞掉本项目窗口的提醒。IDE 应用不在前台时用 `AppIcon.requestAttention(project, true)`；应用在前台但本项目窗口不在前台时，Windows 反射调用 `Win7TaskBar.attention`、X11 反射调用 `X11UiUtil.requestAttention` 闪烁该窗口；macOS 只有应用级 Dock 提醒，应用已活跃时不再额外闪烁。全部在 EDT 调用，不抢焦点、不修改 registry。
 
 ## 4. 快照和本地卡片
 

@@ -151,7 +151,7 @@ class PiSettingsConfigurable : Configurable {
                 font = JBUI.Fonts.smallFont()
             })
             .addComponent(attentionAgentEndCheck!!)
-            .addComponent(JBLabel("Background only; appearance and duration follow the platform. Manual aborts stay silent.").apply {
+            .addComponent(JBLabel("Shown only while this project's window is not focused; appearance and duration follow the platform. Manual aborts stay silent.").apply {
                 foreground = JBUI.CurrentTheme.ContextHelp.FOREGROUND
                 font = JBUI.Fonts.smallFont()
             })

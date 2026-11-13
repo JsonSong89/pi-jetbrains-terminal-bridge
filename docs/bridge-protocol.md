@@ -203,7 +203,7 @@ UI 本地应用的幂等标记与业务状态一起持久化；LOCAL_CONFLICT/LO
 ```
 
 - `agent_start` 创建 runId；`agent_end` 只采集结束原因；`agent_settled` 发送一次事件并清除本次运行。outcome 为 `completed | error | aborted`。没有本实例的 start 不补造完成。
-- IDE 按认证 `(tabKey,runtimeId,runId)` 记忆近期事件并去重；aborted 不提醒。正常/错误结束按两个默认关闭的独立开关播放系统提示音、请求后台应用图标提醒；不发完成 balloon、不抢焦点。
+- IDE 按认证 `(tabKey,runtimeId,runId)` 记忆近期事件并去重；aborted 不提醒。正常/错误结束按两个默认关闭的独立开关播放系统提示音、请求图标提醒（按该项目窗口是否在前台判断，应用在前台但焦点在另一个项目窗口时也提醒）；不发完成 balloon、不抢焦点。
 - 完成事件不是 bridge operation 结果；不得修改操作状态、日志、资源锁或 handoff。快照 idle、断连、操作终态不推断为 agent 完成。
 - 完成事件仅在已 welcome 的连接上发送，不耐久、不重放；断连时可能遗漏提醒。重连快照不补响。IDE 丢弃已退休连接的事件。
 
