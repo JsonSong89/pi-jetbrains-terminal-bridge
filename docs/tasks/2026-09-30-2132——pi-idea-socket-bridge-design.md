@@ -153,6 +153,17 @@ ForkWorkflow 已使用通用交接：只捕获 ticket 配置和原生核验证�
 - tool_result 上报 edit/write/patch/apply 的路径，后台刷新 VFS，可选在 EDT 打开文件；agent 完成通知默认关闭。
 - 面板历史的折叠、滚动锚点、消息轨道和快捷键保持。
 
+### 输入框字体度量
+
+面板输入是 `JBTextArea`（`PiConversationPanel`），不是 IDEA Editor。中文光标相对汉字略偏，发生在同一套默认 `FontRenderContext` 内：主字体不含汉字，fallback 的 advance 与 `FontMetrics` 取整不完全一致。英文在这套度量下是对齐的。
+
+不要为对齐中文而重写 `getFontMetrics` 打开 `FRACTIONALMETRICS_ON`，也不要在 `paint` 里改 `Graphics` 的 fractional hint。JDK 21 上两边不是一条路径：
+
+- 光标由 `GlyphPainter1.modelToView` 使用 `JComponent.getFontMetrics`。
+- 字形由 `SwingUtilities2.drawStringImpl` 绘制。组件已有 `GraphicsConfiguration` 时走 `getFRCProperty()`，fractional metrics **固定**为 `VALUE_FRACTIONALMETRICS_DEFAULT`，不读取 `paint()` 设在 `Graphics` 上的 hint。
+
+只改测量一侧后，光标按分数 advance、字形仍按默认 hint，英文也会逐字错位。这次尝试已从 `dev` 撤掉（原提交 `7f37c78`）。
+
 ## 10. 验证入口与未决项
 
 - `node --test tests/bridge-extension.test.mjs`：执行打包资源，覆盖 registry、快照、busy/取消/歧义、重复 ID、日志/断联/重启、执行结束证据、handoff、背压/framing、v2 完成事件及重连不补响行为。
