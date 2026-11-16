@@ -164,6 +164,8 @@ ForkWorkflow 已使用通用交接：只捕获 ticket 配置和原生核验证�
 
 只改测量一侧后，光标按分数 advance、字形仍按默认 hint，英文也会逐字错位。这次尝试已从 `dev` 撤掉（原提交 `7f37c78`）。
 
+输入区可以单独换一套物理字体（设置项 `inputFontFamily`，空字符串为默认）。默认仍是 `conversationFont()`，历史区不变。选中的家族用 `new Font(family, PLAIN, size)`，不经过 `StyleContext.getFont`，避免再包一层 fallback。下拉只列本机可用家族，并略过 Dialog / Monospaced 这类逻辑字体；`canDisplay('汉')` 的项标「汉」。
+
 ## 10. 验证入口与未决项
 
 - `node --test tests/bridge-extension.test.mjs`：执行打包资源，覆盖 registry、快照、busy/取消/歧义、重复 ID、日志/断联/重启、执行结束证据、handoff、背压/framing、v2 完成事件及重连不补响行为。

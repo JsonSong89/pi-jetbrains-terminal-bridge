@@ -6,9 +6,14 @@ import com.intellij.openapi.ui.ComboBox
 import com.intellij.openapi.util.SystemInfo
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBTextField
+import com.intellij.util.ui.EmptyIcon
 import com.intellij.util.ui.FormBuilder
 import com.intellij.util.ui.JBUI
 import com.piterminal.bridge.bridge.PiBridgeInstaller
+import java.awt.Component
+import java.awt.Graphics
+import java.awt.Graphics2D
+import java.awt.RenderingHints
 import javax.swing.*
 
 /**
@@ -24,6 +29,7 @@ class PiSettingsConfigurable : Configurable {
     private var extraArgsField: JBTextField? = null
     private var sendShortcutCombo: ComboBox<String>? = null
     private var conversationFontSizeSpinner: JSpinner? = null
+    private var inputFontCombo: ComboBox<InputFontChoice>? = null
     private var soundAgentEndCheck: JCheckBox? = null
     private var attentionAgentEndCheck: JCheckBox? = null
     private var openModifiedFilesCheck: JCheckBox? = null
@@ -48,6 +54,8 @@ class PiSettingsConfigurable : Configurable {
             models.forEach { options.add("${it.provider}/${it.id}") }
             return options.toTypedArray()
         }
+
+        private val emptyMark: Icon = EmptyIcon.create(JBUI.scale(16))
     }
 
     override fun getDisplayName(): String = "Pi Terminal Bridge"
@@ -84,6 +92,13 @@ class PiSettingsConfigurable : Configurable {
                 1
             )
         )
+        val inputFontChoices = PiInputFonts.choices()
+        inputFontCombo = ComboBox(inputFontChoices.toTypedArray()).apply {
+            renderer = InputFontRenderer()
+            selectedItem = inputFontChoices.firstOrNull { it.family.equals(settings.inputFontFamily, ignoreCase = true) }
+                ?: inputFontChoices.first()
+            preferredSize = java.awt.Dimension(400, preferredSize.height)
+        }
         soundAgentEndCheck = JCheckBox(
             "Play a system sound when the agent finishes",
             settings.soundOnAgentEnd
@@ -141,7 +156,12 @@ class PiSettingsConfigurable : Configurable {
                 font = JBUI.Fonts.smallFont()
             }, 0)
             .addLabeledComponent(JBLabel("Conversation font size:"), conversationFontSizeSpinner!!, 1, false)
-            .addComponentToRightColumn(JBLabel("Family follows Settings → Editor → Font. Only size is overridden here.").apply {
+            .addComponentToRightColumn(JBLabel("History follows Settings → Editor → Font. This page only overrides the size.").apply {
+                foreground = JBUI.CurrentTheme.ContextHelp.FOREGROUND
+                font = JBUI.Fonts.smallFont()
+            }, 0)
+            .addLabeledComponent(JBLabel("Input font:"), inputFontCombo!!, 1, false)
+            .addComponentToRightColumn(JBLabel("Prompt only. Default keeps the conversation font. A 汉 mark means that face includes Chinese, so the caret can follow those glyphs.").apply {
                 foreground = JBUI.CurrentTheme.ContextHelp.FOREGROUND
                 font = JBUI.Fonts.smallFont()
             }, 0)
@@ -183,6 +203,7 @@ class PiSettingsConfigurable : Configurable {
                 extraArgsField?.text != settings.extraArgs ||
                 (sendShortcutCombo?.selectedItem == SEND_CTRL_ENTER) != settings.sendWithCtrlEnter ||
                 fontSizeValue() != settings.conversationFontSize ||
+                selectedInputFont() != displayedInputFont(settings.inputFontFamily) ||
                 soundAgentEndCheck?.isSelected != settings.soundOnAgentEnd ||
                 attentionAgentEndCheck?.isSelected != settings.attentionOnAgentEnd ||
                 openModifiedFilesCheck?.isSelected != settings.openModifiedFiles
@@ -197,6 +218,7 @@ class PiSettingsConfigurable : Configurable {
         state.extraArgs = extraArgsField?.text ?: ""
         state.sendWithCtrlEnter = sendShortcutCombo?.selectedItem == SEND_CTRL_ENTER
         state.conversationFontSize = fontSizeValue()
+        state.inputFontFamily = selectedInputFont()
         state.soundOnAgentEnd = soundAgentEndCheck?.isSelected == true
         state.attentionOnAgentEnd = attentionAgentEndCheck?.isSelected == true
         state.openModifiedFiles = openModifiedFilesCheck?.isSelected == true
@@ -215,6 +237,11 @@ class PiSettingsConfigurable : Configurable {
             PiSettings.MIN_FONT_SIZE,
             PiSettings.MAX_FONT_SIZE
         )
+        inputFontCombo?.let { combo ->
+            val choices = (0 until combo.itemCount).map { combo.getItemAt(it) }
+            combo.selectedItem = choices.firstOrNull { it.family.equals(settings.inputFontFamily, ignoreCase = true) }
+                ?: choices.firstOrNull()
+        }
         soundAgentEndCheck?.isSelected = settings.soundOnAgentEnd
         attentionAgentEndCheck?.isSelected = settings.attentionOnAgentEnd
         openModifiedFilesCheck?.isSelected = settings.openModifiedFiles
@@ -222,6 +249,18 @@ class PiSettingsConfigurable : Configurable {
 
     private fun fontSizeValue(): Int {
         return (conversationFontSizeSpinner?.value as? Number)?.toInt() ?: PiSettings.DEFAULT_FONT_SIZE
+    }
+
+    private fun selectedInputFont(): String =
+        (inputFontCombo?.selectedItem as? InputFontChoice)?.family.orEmpty()
+
+    /** A family that disappeared from this machine compares as Default, so opening Settings is not dirty. */
+    private fun displayedInputFont(stored: String): String {
+        val combo = inputFontCombo ?: return stored.trim()
+        return (0 until combo.itemCount)
+            .map { combo.getItemAt(it).family }
+            .firstOrNull { it.equals(stored, ignoreCase = true) }
+            .orEmpty()
     }
 
     private fun bridgeStatusText(): String {
@@ -238,5 +277,56 @@ class PiSettingsConfigurable : Configurable {
 
     override fun disposeUIResources() {
         panel = null
+        inputFontCombo = null
+    }
+
+    private class InputFontRenderer : ListCellRenderer<InputFontChoice> {
+        private val label = JBLabel()
+
+        override fun getListCellRendererComponent(
+            list: JList<out InputFontChoice>?,
+            value: InputFontChoice?,
+            index: Int,
+            isSelected: Boolean,
+            cellHasFocus: Boolean
+        ): Component {
+            label.text = when {
+                value == null -> ""
+                value.family.isEmpty() -> "Default"
+                else -> value.family
+            }
+            label.icon = if (value?.supportsChinese == true) HanMarkIcon else emptyMark
+            if (isSelected && list != null) {
+                label.background = list.selectionBackground
+                label.foreground = list.selectionForeground
+            } else {
+                label.background = list?.background
+                label.foreground = list?.foreground
+            }
+            label.isOpaque = true
+            label.border = JBUI.Borders.empty(1, 4)
+            return label
+        }
+    }
+
+    private object HanMarkIcon : Icon {
+        override fun getIconWidth(): Int = JBUI.scale(16)
+        override fun getIconHeight(): Int = JBUI.scale(16)
+
+        override fun paintIcon(c: Component?, g: Graphics, x: Int, y: Int) {
+            val g2 = g.create() as Graphics2D
+            try {
+                g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON)
+                g2.font = JBUI.Fonts.smallFont()
+                g2.color = c?.foreground ?: UIManager.getColor("Label.foreground")
+                val text = "汉"
+                val fm = g2.fontMetrics
+                val tx = x + (iconWidth - fm.stringWidth(text)) / 2
+                val ty = y + (iconHeight - fm.height) / 2 + fm.ascent
+                g2.drawString(text, tx, ty)
+            } finally {
+                g2.dispose()
+            }
+        }
     }
 }

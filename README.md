@@ -142,6 +142,7 @@ power — combine them freely.
 | Setting | Description |
 |---|---|
 | Model / thinking level / extra args | Passed to the `pi` CLI at launch |
+| Input font | Prompt only. Default keeps the conversation font. Families marked 汉 include Chinese glyphs |
 | Play a system sound | Sound on normal completion or error in foreground/background (opt-in); manual aborts stay silent. System volume and sound settings apply. |
 | Request taskbar / Dock attention | Attention when that project's window is not focused, even if another project window in the same IDE is (opt-in); appearance and duration follow OS/IDE settings. |
 | Open files modified by Pi | Also open the file in the editor after a write (opt-in). VFS refresh is always on. |

@@ -30,6 +30,8 @@ class PiSettings : PersistentStateComponent<PiSettings.State> {
         var extraArgs: String = ""
         var shellPath: String = ""
         var conversationFontSize: Int = DEFAULT_FONT_SIZE
+        /** Empty keeps [conversationFont]. Otherwise a physical family for the prompt only. */
+        var inputFontFamily: String = ""
         // Align with Java/XML boolean default (false) so unchecked values persist.
         var sendWithCtrlEnter: Boolean = false
         var soundOnAgentEnd: Boolean = false
@@ -73,6 +75,9 @@ class PiSettings : PersistentStateComponent<PiSettings.State> {
         // Match Editor > Font family; StyleContext adds CJK fallback the editor uses.
         return StyleContext.getDefaultStyleContext().getFont(family, Font.PLAIN, size)
     }
+
+    /** Prompt face. History stays on [conversationFont]. */
+    fun inputFont(): Font = PiInputFonts.resolve(myState.inputFontFamily, conversationFont())
 
     companion object {
         const val DEFAULT_FONT_SIZE = 14

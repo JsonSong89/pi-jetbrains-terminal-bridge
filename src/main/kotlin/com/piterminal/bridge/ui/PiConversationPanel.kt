@@ -404,8 +404,9 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
     }
 
     private fun applyConversationFont() {
-        val font = PiSettings.getInstance().conversationFont()
-        inputArea.font = font
+        val settings = PiSettings.getInstance()
+        val font = settings.conversationFont()
+        inputArea.font = settings.inputFont()
         var rowsDirty = false
         for (card in historyCards) {
             if (card.body.font != font) {
