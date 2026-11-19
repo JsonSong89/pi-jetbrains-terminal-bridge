@@ -156,6 +156,7 @@ Defaults — rebindable in **Settings → Keymap → "Pi Terminal Bridge"**:
 - `Alt+Shift+3` — send selection / file to Pi
 - `Ctrl+Alt+Shift+T` — focus the Pi terminal (only while the prompt input is focused; does not steal Refactor This from the editor)
 - `Ctrl+Alt+Shift+E` — focus the Pi prompt (only while a Pi terminal tab is focused)
+- `Ctrl+Alt+Shift+P` — open a single file path from the clipboard (supports `:line`, `#L`, `file://`; no-op when the clipboard is not a path)
 - `Alt+Up` / `Alt+Down` — jump to the previous / next message header in the history area (only while the history area is focused)
 
 ## Build

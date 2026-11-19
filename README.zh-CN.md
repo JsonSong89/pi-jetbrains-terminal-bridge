@@ -131,6 +131,7 @@ CI 手动触发可勾选 `tui_smoke`；extension 单测与 Gradle 单测在每�
 - `Alt+Shift+3` —— 发送选中内容 / 文件到 Pi
 - `Ctrl+Alt+Shift+T` —— 焦点到 Pi 终端（仅在 prompt 输入框内生效，不会在编辑器里抢走 Refactor This）
 - `Ctrl+Alt+Shift+E` —— 焦点到 Pi prompt（仅在 Pi 终端内生效）
+- `Ctrl+Alt+Shift+P` —— 从剪贴板打开单条文件路径（支持 `:line`、`#L`、`file://`；不是路径时不动作）
 - `Alt+↑` / `Alt+↓` —— 在历史区跳到上/下一条消息头部（仅历史区有焦点时生效）
 
 ## 构建
