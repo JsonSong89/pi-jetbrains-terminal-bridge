@@ -57,6 +57,7 @@ import java.text.SimpleDateFormat
 import java.util.Collections
 import java.util.Date
 import java.util.IdentityHashMap
+import javax.swing.BorderFactory
 import javax.swing.Box
 import javax.swing.BoxLayout
 import javax.swing.DefaultComboBoxModel
@@ -1022,19 +1023,29 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
     }
 
     /**
-     * Width the combo popup's overlay scrollbar paints over the list cells.
+     * Width the combo popup's overlay scrollbar paints over the right edge of
+     * the list cells (in Swing pixels, already HiDPI-scaled).
      *
      * IntelliJ renders the popup's vertical scrollbar on top of the list, so a
      * long conversation list would hide the per-item `×` delete hotspot behind
-     * it. Scrollbars that take layout space already narrow the list, so they
-     * need no extra inset; only the overlay case is handled here.
+     * it. Scrollbars that take layout space sit to the right of the cells, so
+     * they return 0.
      */
     private fun comboPopupScrollBarInset(list: JList<*>): Int {
         val scroll = SwingUtilities.getAncestorOfClass(JScrollPane::class.java, list) as? JScrollPane ?: return 0
         val bar = scroll.verticalScrollBar ?: return 0
         if (!bar.isVisible) return 0
-        if (list.width < scroll.width - JBUI.scale(2)) return 0
-        return bar.preferredSize.width.coerceAtLeast(JBUI.scale(8))
+        val barWidth = bar.width.takeIf { it > 0 } ?: bar.preferredSize.width
+        if (barWidth <= 0) return 0
+        val barParent = bar.parent
+        if (list.width > 0 && barParent != null && bar.width > 0) {
+            val barInList = SwingUtilities.convertRectangle(barParent, bar.bounds, list)
+            val cellRight = list.width - list.insets.right
+            if (barInList.x >= cellRight || barInList.x + barInList.width <= list.width / 2) return 0
+            return (cellRight - barInList.x).coerceAtLeast(0)
+        }
+        val overlapping = (scroll as? JBScrollPane)?.isOverlappingScrollBar == true || !bar.isOpaque
+        return if (overlapping) barWidth else 0
     }
 
     private fun deleteHitIndex(list: JList<*>, e: MouseEvent): Int {
@@ -1045,7 +1056,7 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
         val cell = list.getCellBounds(index, index) ?: return -1
         if (!cell.contains(e.point)) return -1
         val right = cell.x + cell.width - comboPopupScrollBarInset(list)
-        if (e.x < right - JBUI.scale(COMBO_DELETE_HIT_PX)) return -1
+        if (e.x < right - JBUI.scale(COMBO_DELETE_HIT_PX) || e.x >= right) return -1
         return index
     }
 
@@ -1079,11 +1090,17 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
             font = JBUI.Fonts.smallFont()
             isOpaque = false
         }
+        private val content = JPanel(BorderLayout(JBUI.scale(4), 0)).apply {
+            isOpaque = false
+            add(title, BorderLayout.CENTER)
+            add(deleteHint, BorderLayout.EAST)
+        }
+        private var lastScrollBarInset = -1
 
         init {
             isOpaque = true
-            add(title, BorderLayout.CENTER)
-            add(deleteHint, BorderLayout.EAST)
+            border = JBUI.Borders.empty(2, 6)
+            add(content, BorderLayout.CENTER)
         }
 
         override fun getListCellRendererComponent(
@@ -1121,8 +1138,17 @@ class PiConversationPanel(private val project: Project) : SimpleToolWindowPanel(
             val normalFg = if (conversation != null && !alive && !working) JBColor.GRAY else list.foreground
             background = if (isSelected) selectedBg else normalBg
             title.foreground = if (isSelected) selectedFg else normalFg
-            // Keep the delete hotspot clear of the popup's overlay scrollbar.
-            border = JBUI.Borders.empty(2, 6, 2, 6 + comboPopupScrollBarInset(list))
+            if (index < 0) {
+                border = JBUI.Borders.empty(2, 6)
+            }
+            // DarculaComboBoxUI / ComboBoxPopup wrap the renderer and overwrite the
+            // outer component's border with COMBO_ITEM_BORDER on every cell paint,
+            // so reserve the overlay-scrollbar inset on the inner content panel.
+            val scrollBarInset = if (index >= 0) comboPopupScrollBarInset(list) else 0
+            if (scrollBarInset != lastScrollBarInset) {
+                lastScrollBarInset = scrollBarInset
+                content.border = BorderFactory.createEmptyBorder(0, 0, 0, scrollBarInset)
+            }
             return this
         }
     }
