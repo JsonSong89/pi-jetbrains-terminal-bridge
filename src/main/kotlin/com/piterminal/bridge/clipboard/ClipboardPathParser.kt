@@ -47,10 +47,14 @@ object ClipboardPathParser {
         text = expandHome(text, home)
         if (text.isEmpty()) return null
         if (!quoted && text.any { it.isWhitespace() }) return null
-        if (',' in text) return null
 
         if (text.startsWith("@")) text = text.substring(1)
         if (text.isEmpty()) return null
+
+        // A compiler-style `path(12,34)` tail is the only place a comma may appear; drop it before
+        // rejecting comma-bearing prose such as `hello, world`.
+        val withoutCompilerTail = compilerTail.find(text)?.let { text.removeRange(it.range) } ?: text
+        if (',' in withoutCompilerTail) return null
 
         val (path, line, column, endLine) = stripPosition(text)
         if (path.isEmpty()) return null
